@@ -1,0 +1,109 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { db, schema } from '@/lib/db';
+import { eq, desc } from 'drizzle-orm';
+import { readStatsCache } from '@/lib/coordination/stats-cache-reader';
+import { execFileSync } from 'child_process';
+
+function getTmuxSessions(): { name: string; windows: number; created: string | null }[] {
+  try {
+    const output = execFileSync('tmux', ['ls'], {
+      encoding: 'utf-8',
+      timeout: 3000,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+
+    if (!output) return [];
+
+    return output.split('\n').filter(Boolean).map((line) => {
+      const match = line.match(/^([^:]+):\s+(\d+)\s+windows?\s*(?:\(created\s+(.+)\))?/);
+      if (match) {
+        return { name: match[1], windows: parseInt(match[2], 10), created: match[3] || null };
+      }
+      return { name: line.split(':')[0], windows: 0, created: null };
+    });
+  } catch {
+    return [];
+  }
+}
+
+export async function GET(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const projectId = searchParams.get('projectId');
+    const limitParam = Number(searchParams.get('limit') || '500');
+    const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(limitParam, 1000) : 500;
+
+    if (!projectId) {
+      return NextResponse.json({ error: 'projectId required' }, { status: 400 });
+    }
+
+    // 1. DB snapshots (task velocity, agent activity over time)
+  const snapshots = db
+    .select()
+    .from(schema.analyticsSnapshots)
+    .where(eq(schema.analyticsSnapshots.projectId, projectId))
+    .orderBy(desc(schema.analyticsSnapshots.timestamp))
+    .limit(limit)
+    .all()
+    .reverse(); // oldest first for charts
+
+  // 2. Current task breakdown by status
+  const tasks = db
+    .select()
+    .from(schema.tasks)
+    .where(eq(schema.tasks.projectId, projectId))
+    .all();
+
+  const tasksByStatus: Record<string, number> = {};
+  for (const t of tasks) {
+    tasksByStatus[t.status] = (tasksByStatus[t.status] || 0) + 1;
+  }
+
+  // 3. Current agent statuses
+  const agents = db
+    .select()
+    .from(schema.agentSnapshots)
+    .where(eq(schema.agentSnapshots.projectId, projectId))
+    .all();
+
+  const agentsByStatus: Record<string, number> = {};
+  for (const a of agents) {
+    agentsByStatus[a.status] = (agentsByStatus[a.status] || 0) + 1;
+  }
+
+  // 4. Real cost data from Claude stats-cache
+  const statsCache = readStatsCache();
+
+  // 5. Tmux sessions (filter to project-related if possible)
+  const allTmuxSessions = getTmuxSessions();
+
+  // Try to match tmux sessions to the project by looking at project name
+  const project = db
+    .select()
+    .from(schema.projects)
+    .where(eq(schema.projects.id, projectId))
+    .get();
+
+  const projectPrefix = project?.name?.toLowerCase().replace(/[^a-z0-9]/g, '-') || '';
+  const tmuxSessions = projectPrefix
+    ? allTmuxSessions.filter((s) => s.name.toLowerCase().includes(projectPrefix) || s.name.toLowerCase().startsWith(projectPrefix.split('-')[0]))
+    : allTmuxSessions;
+
+    return NextResponse.json({
+      snapshots,
+      tasksByStatus,
+      agentsByStatus,
+      totalTasks: tasks.length,
+      totalAgents: agents.length,
+      costData: {
+        days: statsCache.days,
+        totalCost: statsCache.totalCost,
+        modelUsage: statsCache.modelUsage,
+      },
+      tmuxSessions,
+    });
+  } catch (err) {
+    console.error('GET /api/analytics error:', err);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}
