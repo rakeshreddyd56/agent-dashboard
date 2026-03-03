@@ -60,6 +60,7 @@ export default function MissionPage() {
   const [saving, setSaving] = useState(false);
   const [launching, setLaunching] = useState(false);
   const [launchInfo, setLaunchInfo] = useState<LaunchInfo | null>(null);
+  const [launchResult, setLaunchResult] = useState<{ ok: boolean; message: string } | null>(null);
 
   // Form state
   const [goal, setGoal] = useState('');
@@ -166,17 +167,23 @@ export default function MissionPage() {
   const handleLaunchAll = async () => {
     if (!activeProjectId) return;
     setLaunching(true);
+    setLaunchResult(null);
 
     try {
-      await fetch('/api/agents/launch', {
+      const res = await fetch('/api/agents/launch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId: activeProjectId, launchAll: true }),
+        body: JSON.stringify({ projectId: activeProjectId, launchAll: true, agents: Array.from(selectedRoles) }),
       });
-      // Refresh launch info after a short delay
+      const data = await res.json();
+      if (data.launched) {
+        setLaunchResult({ ok: true, message: 'All agents launched successfully' });
+      } else {
+        setLaunchResult({ ok: false, message: data.error || 'Launch failed' });
+      }
       setTimeout(fetchLaunchInfo, 2000);
     } catch (err) {
-      console.error('Failed to launch agents:', err);
+      setLaunchResult({ ok: false, message: err instanceof Error ? err.message : 'Launch failed' });
     } finally {
       setLaunching(false);
     }
@@ -185,16 +192,30 @@ export default function MissionPage() {
   const handleLaunchSelected = async () => {
     if (!activeProjectId || selectedRoles.size === 0) return;
     setLaunching(true);
+    setLaunchResult(null);
 
     try {
-      await fetch('/api/agents/launch', {
+      const res = await fetch('/api/agents/launch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ projectId: activeProjectId, agents: Array.from(selectedRoles) }),
       });
+      const data = await res.json();
+      if (data.results) {
+        const launched = data.results.filter((r: { status: string }) => r.status === 'launched');
+        const errors = data.results.filter((r: { status: string }) => r.status === 'error');
+        const running = data.results.filter((r: { status: string }) => r.status === 'already_running');
+        const parts: string[] = [];
+        if (launched.length > 0) parts.push(`${launched.length} launched`);
+        if (running.length > 0) parts.push(`${running.length} already running`);
+        if (errors.length > 0) parts.push(`${errors.length} failed`);
+        setLaunchResult({ ok: errors.length === 0, message: parts.join(', ') || 'No agents processed' });
+      } else if (data.error) {
+        setLaunchResult({ ok: false, message: data.error });
+      }
       setTimeout(fetchLaunchInfo, 2000);
     } catch (err) {
-      console.error('Failed to launch agents:', err);
+      setLaunchResult({ ok: false, message: err instanceof Error ? err.message : 'Launch failed' });
     } finally {
       setLaunching(false);
     }
@@ -431,6 +452,22 @@ export default function MissionPage() {
                       </Button>
                     )}
                   </div>
+
+                  {/* Launch result feedback */}
+                  {launchResult && (
+                    <div className={`rounded-lg border px-3 py-2 text-xs ${
+                      launchResult.ok
+                        ? 'border-[#0d7a4a]/30 bg-[#3dba8a]/5 text-[#3dba8a]'
+                        : 'border-[#a4312f]/30 bg-[#e05252]/5 text-[#e05252]'
+                    }`}>
+                      {launchResult.ok ? (
+                        <CheckCircle className="mr-1.5 inline h-3.5 w-3.5" />
+                      ) : (
+                        <span className="mr-1.5 inline-block h-3.5 w-3.5 text-center">!</span>
+                      )}
+                      {launchResult.message}
+                    </div>
+                  )}
                 </>
               )}
             </CardContent>
