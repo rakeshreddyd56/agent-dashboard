@@ -421,6 +421,9 @@ function parseStructuredTasks(content: string, projectId: string): Task[] {
     lineNum: number;
   } | null = null;
 
+  // Track the last field we assigned to, so continuation lines can append
+  let lastFieldTarget: 'description' | null = null;
+
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
 
@@ -434,7 +437,7 @@ function parseStructuredTasks(content: string, projectId: string): Task[] {
           projectId,
           externalId: currentTask.externalId,
           title: currentTask.title,
-          description: currentTask.description,
+          description: currentTask.description?.trim() || undefined,
           status: currentTask.status,
           priority: currentTask.priority,
           assignedAgent: currentTask.assignedAgent,
@@ -457,33 +460,39 @@ function parseStructuredTasks(content: string, projectId: string): Task[] {
         dependencies: [],
         lineNum: i,
       };
+      lastFieldTarget = null;
       continue;
     }
 
     if (!currentTask) continue;
 
-    // Match: - **Field:** value
+    // Match: - **Field:** value  or  - **Field**: value
     const fieldMatch = line.match(/^[-*]\s+\*\*([^*]+)\*\*:?\s*(.*)$/);
     if (fieldMatch) {
+      lastFieldTarget = null; // Reset continuation tracking
       const [, field, value] = fieldMatch;
-      const fieldLower = field.toLowerCase().trim();
+      const fieldLower = field.toLowerCase().trim().replace(/:$/, '');
       const valueTrimmed = value.trim();
 
       switch (fieldLower) {
-        case 'status':
-        case 'status:': {
+        case 'status': {
           // Strip emoji prefixes (✅, 🔴, 🟡, 🟢, ⏳, etc.) and clean up
+          // Also strip parenthetical notes like "(maps to queue TASK-007)"
           const cleanStatus = valueTrimmed
-            .replace(/^[\u2705\u{1F534}\u{1F7E1}\u{1F7E2}\u{1F7E0}\u{1F7E3}\u23F3\u{1F6D1}\u274C]/u, '')
+            .replace(/^[\u2705\u{1F534}\u{1F7E1}\u{1F7E2}\u{1F7E0}\u{1F7E3}\u23F3\u{1F6D1}\u274C\u26A0\uFE0F]/u, '')
+            .replace(/\s*\(.*\)\s*$/, '')
             .trim().toLowerCase();
           currentTask.status = structuredStatusMap[cleanStatus] || 'BACKLOG';
           break;
         }
-        case 'priority':
-          if (/^P[0-3]$/i.test(valueTrimmed)) {
-            currentTask.priority = valueTrimmed.toUpperCase() as TaskPriority;
+        case 'priority': {
+          // Extract P0-P3 even with suffix like "P0 — Critical"
+          const pMatch = valueTrimmed.match(/P([0-3])/i);
+          if (pMatch) {
+            currentTask.priority = `P${pMatch[1]}` as TaskPriority;
           }
           break;
+        }
         case 'assigned to':
         case 'assigned':
         case 'assignee':
@@ -491,17 +500,41 @@ function parseStructuredTasks(content: string, projectId: string): Task[] {
         case 'owner':
           currentTask.assignedAgent = valueTrimmed || undefined;
           break;
-        case 'action':
-        case 'completed':
-        case 'files':
-        case 'findings':
-          // Known metadata fields — capture as description supplement if no description yet
-          if (!currentTask.description && valueTrimmed) {
-            currentTask.description = valueTrimmed;
-          }
-          break;
         case 'description':
           currentTask.description = valueTrimmed || undefined;
+          lastFieldTarget = 'description';
+          break;
+        case 'fix':
+        case 'fix applied':
+        case 'action':
+        case 'acceptance':
+        case 'note':
+        case '\u26A0\uFE0F note': {
+          // Append to description as supplementary info
+          const supplement = `${field}: ${valueTrimmed}`;
+          if (currentTask.description) {
+            currentTask.description += '\n' + supplement;
+          } else {
+            currentTask.description = supplement;
+          }
+          lastFieldTarget = 'description';
+          break;
+        }
+        case 'completed':
+        case 'findings':
+          // Known metadata — use as description if none exists
+          if (!currentTask.description && valueTrimmed) {
+            currentTask.description = valueTrimmed;
+          } else if (currentTask.description && valueTrimmed) {
+            currentTask.description += '\n' + valueTrimmed;
+          }
+          break;
+        case 'files':
+          // Capture as tags (file paths mentioned)
+          if (valueTrimmed) {
+            const filePaths = valueTrimmed.split(',').map((f) => f.trim().replace(/`/g, '')).filter(Boolean);
+            currentTask.tags.push(...filePaths);
+          }
           break;
         case 'effort':
           currentTask.effort = valueTrimmed || undefined;
@@ -514,6 +547,14 @@ function parseStructuredTasks(content: string, projectId: string): Task[] {
           currentTask.tags = valueTrimmed.split(',').map((t) => t.trim()).filter(Boolean);
           break;
       }
+      continue;
+    }
+
+    // Continuation lines: indented text (2+ spaces or tab) that follows a description field
+    if (lastFieldTarget === 'description' && currentTask && /^\s{2,}/.test(line) && line.trim()) {
+      currentTask.description = (currentTask.description || '') + '\n' + line.trimEnd();
+    } else if (line.trim() === '' || line.match(/^---/)) {
+      lastFieldTarget = null; // Blank line or separator ends continuation
     }
   }
 

@@ -20,6 +20,25 @@ function getTmuxSessions(): string[] {
 }
 
 /**
+ * Check if a tmux session's active process is just sleeping (agent finished).
+ * Returns true if the agent process (claude) has exited and only sleep/bash remains.
+ */
+function isTmuxSessionIdle(sessionName: string): boolean {
+  try {
+    const output = execFileSync('tmux', ['capture-pane', '-t', sessionName, '-p', '-S', '-5'], {
+      encoding: 'utf-8',
+      timeout: 3000,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+    // If the last few lines contain "DONE" or the pane shows sleep, agent is finished
+    const lower = output.toLowerCase();
+    return lower.includes('done') || lower.includes('sleep 999') || lower.includes('exited');
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Periodic heartbeat check — runs independently of file-watcher.
  * Detects agents whose heartbeat is stale and marks them offline/completed.
  * Also checks if the tmux session is still alive.
@@ -46,9 +65,14 @@ export function checkStaleAgents(projectId: string): void {
     // Check if the tmux session is still alive
     const sessionAlive = tmuxSessions.some((s) => s.includes(agent.agent_id));
 
-    // If tmux session is dead and heartbeat is stale → completed
-    // If tmux session is alive but heartbeat stale → offline (might be stuck)
-    const newStatus = sessionAlive ? 'offline' : 'completed';
+    // If tmux session is dead → completed
+    // If tmux session is alive but idle (sleeping/DONE) → completed
+    // If tmux session is alive and not idle → offline (might be stuck)
+    const sessionName = sessionAlive
+      ? tmuxSessions.find((s) => s.includes(agent.agent_id)) || ''
+      : '';
+    const idle = sessionAlive && sessionName ? isTmuxSessionIdle(sessionName) : false;
+    const newStatus = !sessionAlive || idle ? 'completed' : 'offline';
 
     const updatedAgent: AgentRow = {
       ...agent,

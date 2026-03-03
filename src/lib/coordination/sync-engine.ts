@@ -62,9 +62,18 @@ export async function syncProject(project: Project) {
   }
 
   // Detect stale heartbeats (>5min for non-completed agents)
+  // Respect existing DB status — never downgrade 'completed' agents
   const now = Date.now();
+  const existingAgents = getProjectAgents(projectId);
+  const existingStatusMap = new Map(existingAgents.map((a) => [a.agent_id, a.status]));
   const staleAgentIds: string[] = [];
   for (const agent of agents) {
+    // If the DB already has this agent as 'completed', preserve that
+    const dbStatus = existingStatusMap.get(agent.agentId);
+    if (dbStatus === 'completed') {
+      agent.status = 'completed';
+      continue;
+    }
     if (agent.status === 'completed' || agent.status === 'offline') continue;
     if (agent.lastHeartbeat) {
       const hbTime = new Date(agent.lastHeartbeat).getTime();
