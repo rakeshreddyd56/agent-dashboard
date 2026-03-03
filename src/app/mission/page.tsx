@@ -3,7 +3,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { useProjectStore } from '@/lib/store/project-store';
@@ -12,12 +11,10 @@ import {
   Rocket,
   Save,
   Play,
-  Square,
   Terminal,
   CheckCircle,
   Circle,
   Loader2,
-  AlertCircle,
   FolderOpen,
   FileText,
   Users,
@@ -408,13 +405,15 @@ export default function MissionPage() {
                     </div>
                   ) : (
                     <div className="rounded-lg border border-dashed border-border/50 p-4 text-center">
-                      <AlertCircle className="mx-auto mb-2 h-5 w-5 text-muted-foreground" />
+                      <Terminal className="mx-auto mb-2 h-5 w-5 text-muted-foreground" />
                       <p className="text-xs text-muted-foreground">
-                        No agent scripts found in <span className="font-mono">scripts/run-*.sh</span>
+                        No runner scripts yet — select agents above and click Launch to auto-generate them
                       </p>
-                      <p className="mt-1 text-[10px] text-muted-foreground">
-                        Create runner scripts to launch agents from the dashboard
-                      </p>
+                      {selectedRoles.size === 0 && (
+                        <p className="mt-1 text-[10px] text-muted-foreground">
+                          Select at least one agent role from the team above
+                        </p>
+                      )}
                     </div>
                   )}
 
@@ -425,10 +424,10 @@ export default function MissionPage() {
                         Launch All Agents
                       </Button>
                     )}
-                    {selectedRoles.size > 0 && launchInfo.agentScripts.length > 0 && (
-                      <Button onClick={handleLaunchSelected} disabled={launching} size="sm" variant="outline">
+                    {selectedRoles.size > 0 && (
+                      <Button onClick={handleLaunchSelected} disabled={launching} size="sm" variant={launchInfo.agentScripts.length > 0 ? 'outline' : 'default'}>
                         {launching ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Play className="mr-1.5 h-3.5 w-3.5" />}
-                        Launch Selected ({selectedRoles.size})
+                        {launchInfo.agentScripts.length > 0 ? `Launch Selected (${selectedRoles.size})` : `Generate & Launch (${selectedRoles.size})`}
                       </Button>
                     )}
                   </div>

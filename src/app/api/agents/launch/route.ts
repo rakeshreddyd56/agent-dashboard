@@ -11,6 +11,44 @@ function sanitizeName(name: string): string | null {
   return sanitized.length > 0 && sanitized.length <= 50 ? sanitized : null;
 }
 
+// Auto-generate a runner script for an agent role
+function generateRunnerScript(projectPath: string, role: string, projectName: string): string {
+  const scriptsDir = path.join(projectPath, 'scripts');
+  if (!fs.existsSync(scriptsDir)) {
+    fs.mkdirSync(scriptsDir, { recursive: true });
+  }
+
+  const scriptPath = path.join(scriptsDir, `run-${role}.sh`);
+  if (fs.existsSync(scriptPath)) return scriptPath;
+
+  // Check if there's an agent template in .claude/agents/<role>.md
+  const agentMdPath = path.join(projectPath, '.claude', 'agents', `${role}.md`);
+  const hasAgentTemplate = fs.existsSync(agentMdPath);
+
+  const systemPromptLine = hasAgentTemplate
+    ? `SYSTEM_PROMPT="$(cat .claude/agents/${role}.md)"`
+    : `SYSTEM_PROMPT="You are the ${role} agent for the ${projectName} project. Work from the coordination directory at .claude/coordination/ to pick up tasks, update status, and coordinate with other agents. Check TASKS.md for your assignments."`;
+
+  const script = `#!/usr/bin/env bash
+# Auto-generated runner script for ${role} agent
+# Project: ${projectName}
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+unset CLAUDECODE
+
+${systemPromptLine}
+
+exec claude \\
+  --system-prompt "$SYSTEM_PROMPT" \\
+  --allowedTools "Read,Write,Edit,Bash,Grep,Glob" \\
+  -p "You are the ${role} agent. Read .claude/coordination/TASKS.md and begin working on your assigned tasks. Update task status as you progress."
+`;
+
+  fs.writeFileSync(scriptPath, script, { mode: 0o755 });
+  return scriptPath;
+}
+
 function getTmuxSessions(): string[] {
   try {
     const output = execFileSync('tmux', ['ls'], {
@@ -128,11 +166,43 @@ export async function POST(req: NextRequest) {
     const activeSessions = getTmuxSessions();
     const results: { role: string; status: string; session?: string; error?: string }[] = [];
 
+    // Option 0: Generate scripts only (no launch)
+    if (body.generate && Array.isArray(body.agents)) {
+      const generated: string[] = [];
+      for (const role of body.agents as string[]) {
+        const sanitizedRole = sanitizeName(role);
+        if (!sanitizedRole) continue;
+        try {
+          generateRunnerScript(project.path, sanitizedRole, project.name);
+          generated.push(sanitizedRole);
+        } catch { /* skip */ }
+      }
+      return NextResponse.json({ generated });
+    }
+
     // Option 1: Launch all agents via launch-agents.sh
     if (launchAll) {
       const launchScript = path.join(scriptsDir, 'launch-agents.sh');
       if (!fs.existsSync(launchScript)) {
-        return NextResponse.json({ error: 'launch-agents.sh not found' }, { status: 400 });
+        // Auto-generate launch-agents.sh from selected roles or all known scripts
+        const roles = Array.isArray(agentRoles) ? agentRoles as string[] : [];
+        if (roles.length === 0) {
+          return NextResponse.json({ error: 'No agents specified and launch-agents.sh not found' }, { status: 400 });
+        }
+        // Generate individual scripts and a launch-all wrapper
+        const scriptLines = ['#!/usr/bin/env bash', `# Auto-generated launch script for ${project.name}`, 'set -euo pipefail', 'cd "$(dirname "$0")/.."', ''];
+        for (const role of roles) {
+          const sanitizedRole = sanitizeName(role);
+          if (!sanitizedRole) continue;
+          generateRunnerScript(project.path, sanitizedRole, project.name);
+          const sessionName = `${prefix}-${sanitizedRole}`;
+          scriptLines.push(`echo "Launching ${sanitizedRole}..."`);
+          scriptLines.push(`tmux new-session -d -s ${sessionName} -c "$(pwd)" "bash scripts/run-${sanitizedRole}.sh 2>&1 | tee /tmp/${sessionName}.log; echo '${sanitizedRole.toUpperCase()} DONE'; sleep 999999"`);
+          scriptLines.push('');
+        }
+        scriptLines.push('echo "All agents launched."');
+        if (!fs.existsSync(scriptsDir)) fs.mkdirSync(scriptsDir, { recursive: true });
+        fs.writeFileSync(launchScript, scriptLines.join('\n'), { mode: 0o755 });
       }
       // Validate script path is within the project directory
       const resolvedScript = path.resolve(launchScript);
@@ -179,11 +249,15 @@ export async function POST(req: NextRequest) {
         continue;
       }
 
-      // Check for run script
-      const scriptPath = path.join(scriptsDir, `run-${sanitizedRole}.sh`);
+      // Auto-generate run script if it doesn't exist
+      let scriptPath = path.join(scriptsDir, `run-${sanitizedRole}.sh`);
       if (!fs.existsSync(scriptPath)) {
-        results.push({ role: sanitizedRole, status: 'error', error: `Script run-${sanitizedRole}.sh not found` });
-        continue;
+        try {
+          scriptPath = generateRunnerScript(project.path, sanitizedRole, project.name);
+        } catch (genErr) {
+          results.push({ role: sanitizedRole, status: 'error', error: `Failed to generate script: ${genErr instanceof Error ? genErr.message : String(genErr)}` });
+          continue;
+        }
       }
 
       try {
