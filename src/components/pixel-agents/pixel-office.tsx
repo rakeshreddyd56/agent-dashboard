@@ -370,9 +370,6 @@ export function PixelOffice({ agents, compact, projectName }: PixelOfficeProps) 
       ctx.fillText('Work Area', 7 * T, T * 0.35);
       ctx.fillText('Break Room', 17 * T, T * 0.35);
       ctx.fillText('Server', 17 * T, 7.35 * T);
-      ctx.fillStyle = '#9333ea';
-      ctx.fillText('Rataa', 17 * T, 9.35 * T);
-      ctx.fillStyle = '#8a7050';
       // Divider line between work area and break/server area
       ctx.strokeStyle = '#4a3828';
       ctx.lineWidth = 2;
@@ -393,6 +390,12 @@ export function PixelOffice({ agents, compact, projectName }: PixelOfficeProps) 
           ctx.drawImage(img, px, py + T - dh, dw, dh);
         }
       }
+
+      // ── Rataa label (drawn after furniture so desk doesn't cover it) ──
+      ctx.fillStyle = '#9333ea';
+      ctx.font = `bold ${Z * 2.5}px monospace`;
+      ctx.textAlign = 'center';
+      ctx.fillText('Rataa', 17 * T, 9.15 * T);
 
       // ── Update & draw agents ──
       const sims = simsRef.current;

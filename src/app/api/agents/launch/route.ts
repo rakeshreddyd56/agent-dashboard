@@ -148,24 +148,53 @@ function generateSupervisorScript(projectPath: string, projectName: string, proj
   const agentMdPath = path.join(projectPath, '.claude', 'agents', 'supervisor.md');
   const hasAgentTemplate = fs.existsSync(agentMdPath);
 
+  const pid = sanitizeForShell(projectId);
+  const pname = sanitizeForShell(projectName);
   const systemPromptLine = hasAgentTemplate
     ? `SYSTEM_PROMPT="$(cat .claude/agents/supervisor.md)"`
-    : `SYSTEM_PROMPT="You are Rataa, the supervisor agent for the ${sanitizeForShell(projectName)} project.
+    : `SYSTEM_PROMPT="You are Rataa, the supervisor agent for the ${pname} project. You are the BOSS. You decide when to spawn agents and push them to complete tasks.
 
-Your job is to monitor all agents and push them to complete their tasks. You run in a continuous loop.
+PROJECT_ID: ${pid}
+DASHBOARD: http://localhost:3000
 
-Each cycle you must:
-1. Check agent status: curl -s http://localhost:3000/api/agent-actions?action=list-agents\\&projectId=${sanitizeForShell(projectId)}
-2. Check board progress: curl -s http://localhost:3000/api/agent-actions?action=board-summary\\&projectId=${sanitizeForShell(projectId)}
-3. Read the mission: curl -s http://localhost:3000/api/agent-actions?action=read-mission\\&projectId=${sanitizeForShell(projectId)}
-4. Send messages to agents who are idle or stuck:
-   curl -s -X POST http://localhost:3000/api/agent-actions -H 'Content-Type: application/json' -d '{\\\"action\\\":\\\"send-message\\\",\\\"projectId\\\":\\\"${sanitizeForShell(projectId)}\\\",\\\"fromAgent\\\":\\\"supervisor\\\",\\\"toAgent\\\":\\\"AGENT_ID\\\",\\\"content\\\":\\\"YOUR_MESSAGE\\\"}'
-5. When ALL tasks are DONE or TESTED (100% completion):
-   a. Start a test server: cd PROJECT_DIR && npm run dev (or next dev) in background
-   b. Commit and push: curl -s -X POST http://localhost:3000/api/git -H 'Content-Type: application/json' -d '{\\\"projectId\\\":\\\"${sanitizeForShell(projectId)}\\\",\\\"action\\\":\\\"commit-and-push\\\",\\\"message\\\":\\\"Mission complete - all tasks done\\\"}'
-   c. Print a summary of all completed work
+== YOUR COMMANDS (run via bash curl) ==
 
-Report your findings clearly each cycle. You are the boss - be direct and push agents to finish."`;
+CHECK AGENTS:
+  curl -s 'http://localhost:3000/api/agent-actions?action=list-agents&projectId=${pid}'
+
+CHECK BOARD:
+  curl -s 'http://localhost:3000/api/agent-actions?action=board-summary&projectId=${pid}'
+
+READ MISSION:
+  curl -s 'http://localhost:3000/api/agent-actions?action=read-mission&projectId=${pid}'
+
+LIST TODO TASKS:
+  curl -s 'http://localhost:3000/api/agent-actions?action=list-tasks&projectId=${pid}&status=TODO'
+
+SPAWN/RESPAWN AGENTS (you decide who to launch):
+  curl -s -X POST http://localhost:3000/api/agents/launch -H 'Content-Type: application/json' -d '{\\\"projectId\\\":\\\"${pid}\\\",\\\"agents\\\":[\\\"architect\\\",\\\"coder\\\",\\\"coder-2\\\",\\\"reviewer\\\",\\\"tester\\\"]}'
+
+SPAWN ONE AGENT WITH A SPECIFIC TASK:
+  curl -s -X POST http://localhost:3000/api/agents/launch -H 'Content-Type: application/json' -d '{\\\"projectId\\\":\\\"${pid}\\\",\\\"agents\\\":[\\\"ROLE\\\"],\\\"task\\\":{\\\"id\\\":\\\"TASK_ID\\\",\\\"title\\\":\\\"TASK_TITLE\\\"}}'
+
+SEND MESSAGE TO AN AGENT:
+  curl -s -X POST http://localhost:3000/api/agent-actions -H 'Content-Type: application/json' -d '{\\\"action\\\":\\\"send-message\\\",\\\"projectId\\\":\\\"${pid}\\\",\\\"fromAgent\\\":\\\"supervisor\\\",\\\"toAgent\\\":\\\"AGENT_ID\\\",\\\"content\\\":\\\"MESSAGE\\\"}'
+
+MOVE TASK STATUS:
+  curl -s -X POST http://localhost:3000/api/agent-actions -H 'Content-Type: application/json' -d '{\\\"action\\\":\\\"move-task\\\",\\\"projectId\\\":\\\"${pid}\\\",\\\"taskId\\\":\\\"TASK_ID\\\",\\\"status\\\":\\\"IN_PROGRESS\\\"}'
+
+COMMIT AND PUSH (only at 100%):
+  curl -s -X POST http://localhost:3000/api/git -H 'Content-Type: application/json' -d '{\\\"projectId\\\":\\\"${pid}\\\",\\\"action\\\":\\\"commit-and-push\\\",\\\"message\\\":\\\"Mission complete\\\"}'
+
+GIT STATUS:
+  curl -s -X POST http://localhost:3000/api/git -H 'Content-Type: application/json' -d '{\\\"projectId\\\":\\\"${pid}\\\",\\\"action\\\":\\\"status\\\"}'
+
+== EACH CYCLE ==
+1. Check which agents are online. If agents are offline/completed, SPAWN them with the next TODO task.
+2. Check board — identify stuck/blocked tasks and reassign.
+3. Send messages to push agents.
+4. At 100% completion: run tests, commit, push, provide summary.
+5. You are Rataa. Be assertive. Get things done."`;
 
   // Supervisor runs in a bash loop — each iteration is one supervision cycle
   const script = `#!/usr/bin/env bash
@@ -221,6 +250,8 @@ done
 function registerLaunchedAgent(projectId: string, role: string, coordinationPath: string): void {
   const now = new Date().toISOString();
   const agentId = role; // Use role as agent ID (matches convention)
+  // Supervisor starts as 'working' immediately (it's a loop); others start as 'initializing'
+  const initialStatus = role === 'supervisor' ? 'working' : 'initializing';
 
   // 1. Ensure per-project tables exist
   if (!projectTablesExist(projectId)) {
@@ -232,8 +263,8 @@ function registerLaunchedAgent(projectId: string, role: string, coordinationPath
     id: `${projectId}-${agentId}`,
     agent_id: agentId,
     role,
-    status: 'initializing',
-    current_task: null,
+    status: initialStatus,
+    current_task: role === 'supervisor' ? 'supervision' : null,
     model: 'claude-sonnet-4-6',
     session_start: now,
     last_heartbeat: now,
@@ -261,8 +292,8 @@ function registerLaunchedAgent(projectId: string, role: string, coordinationPath
     const agentEntry = {
       name: agentId,
       role,
-      status: 'initializing',
-      current_task: '',
+      status: initialStatus,
+      current_task: role === 'supervisor' ? 'supervision' : '',
       session_start: now,
       last_heartbeat: now,
     };
@@ -284,7 +315,8 @@ function registerLaunchedAgent(projectId: string, role: string, coordinationPath
     agentId,
     id: `${projectId}-${agentId}`,
     role,
-    status: 'initializing',
+    status: initialStatus,
+    currentTask: role === 'supervisor' ? 'supervision' : null,
     sessionStart: now,
     lastHeartbeat: now,
     lockedFiles: [],
@@ -529,9 +561,11 @@ export async function POST(req: NextRequest) {
         scriptFile = `run-${sanitizedRole}.sh`;
       }
 
-      // Supervisor gets a special looping script
+      // Supervisor gets a special looping script — always regenerate to pick up latest commands
       if (sanitizedRole === 'supervisor' && !taskInfo?.id) {
         try {
+          const oldScript = path.join(scriptsDir, 'run-supervisor.sh');
+          if (fs.existsSync(oldScript)) fs.unlinkSync(oldScript);
           generateSupervisorScript(project.path, project.name, projectId as string);
           scriptFile = 'run-supervisor.sh';
         } catch { /* fall through to standard generation */ }

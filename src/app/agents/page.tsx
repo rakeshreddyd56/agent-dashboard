@@ -92,7 +92,8 @@ export default function AgentsPage() {
         body: JSON.stringify({ projectId: activeProjectId, agents: ['supervisor'] }),
       });
       const data = await res.json();
-      setLaunchMsg(data.results?.[0]?.status === 'launched' ? 'Rataa launched' : 'Launch failed');
+      const st = data.results?.[0]?.status;
+      setLaunchMsg(st === 'launched' ? 'Rataa launched' : st === 'already_running' ? 'Rataa already running' : 'Launch failed');
     } catch {
       setLaunchMsg('Launch failed');
     } finally {
