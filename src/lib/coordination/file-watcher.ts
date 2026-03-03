@@ -1,14 +1,17 @@
 import { watch, type FSWatcher } from 'chokidar';
 import { syncProject } from './sync-engine';
+import { checkStaleAgents } from './heartbeat-checker';
 import type { Project } from '@/lib/types';
 
 const DEBOUNCE_MS = 500;
 const RESTART_DELAY_MS = 5000;
+const HEARTBEAT_CHECK_INTERVAL_MS = 60_000; // 60s
 
 class FileWatcherManager {
   private watchers: Map<string, FSWatcher> = new Map();
   private debounceTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
   private projects: Map<string, Project> = new Map();
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
   async startWatching(project: Project) {
     // Stop existing watcher for this project
@@ -60,6 +63,22 @@ class FileWatcherManager {
     });
 
     this.watchers.set(project.id, watcher);
+
+    // Start periodic heartbeat checker if not already running
+    this.ensureHeartbeatChecker();
+  }
+
+  private ensureHeartbeatChecker() {
+    if (this.heartbeatTimer) return;
+    this.heartbeatTimer = setInterval(() => {
+      for (const [, project] of this.projects) {
+        try {
+          checkStaleAgents(project.id);
+        } catch (err) {
+          console.error(`Heartbeat check failed for ${project.id}:`, err);
+        }
+      }
+    }, HEARTBEAT_CHECK_INTERVAL_MS);
   }
 
   stopWatching(projectId: string) {

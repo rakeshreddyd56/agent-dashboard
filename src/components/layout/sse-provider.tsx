@@ -91,23 +91,30 @@ function handleSSEMessage(e: MessageEvent) {
 export function SSEProvider() {
   const activeProjectId = useProjectStore((s) => s.activeProjectId);
   const eventSourceRef = useRef<EventSource | null>(null);
-  const initRef = useRef(false);
+  const lastProjectRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!activeProjectId) return;
 
     setSSEState('connecting');
 
-    // Load initial data only once per project change
-    if (!initRef.current || eventSourceRef.current === null) {
-      initRef.current = true;
-      Promise.all([
-        fetch(`/api/tasks?projectId=${activeProjectId}`).then((r) => r.ok ? r.json() : null),
-        fetch(`/api/agents?projectId=${activeProjectId}`).then((r) => r.ok ? r.json() : null),
-      ]).then(([taskData, agentData]) => {
-        if (taskData?.tasks) useTaskStore.getState().setTasks(taskData.tasks);
-        if (agentData?.agents) useAgentStore.getState().setAgents(agentData.agents);
-      }).catch(console.error);
+    // Always fetch latest data on mount or project change
+    const projectChanged = lastProjectRef.current !== activeProjectId;
+    lastProjectRef.current = activeProjectId;
+
+    // Fetch fresh data from API (always — handles page refresh and project switch)
+    Promise.all([
+      fetch(`/api/tasks?projectId=${activeProjectId}`).then((r) => r.ok ? r.json() : null),
+      fetch(`/api/agents?projectId=${activeProjectId}`).then((r) => r.ok ? r.json() : null),
+    ]).then(([taskData, agentData]) => {
+      if (taskData?.tasks) useTaskStore.getState().setTasks(taskData.tasks);
+      if (agentData?.agents) useAgentStore.getState().setAgents(agentData.agents);
+    }).catch(console.error);
+
+    // On project change, clear stale data from old project
+    if (projectChanged) {
+      useTaskStore.getState().setTasks([]);
+      useAgentStore.getState().setAgents([]);
     }
 
     // Connect SSE

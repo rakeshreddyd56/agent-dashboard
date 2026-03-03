@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getProjectAgents } from '@/lib/db/project-queries';
 import { projectTablesExist, createProjectTables } from '@/lib/db/dynamic-tables';
+import { checkStaleAgents } from '@/lib/coordination/heartbeat-checker';
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -13,6 +14,9 @@ export async function GET(req: NextRequest) {
   if (!projectTablesExist(projectId)) {
     createProjectTables(projectId);
   }
+
+  // Check for stale heartbeats before returning agents
+  checkStaleAgents(projectId);
 
   const agents = getProjectAgents(projectId).map((a) => ({
     id: a.id,
