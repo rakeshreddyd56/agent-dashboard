@@ -1,6 +1,5 @@
 import { db, schema } from '@/lib/db';
-import { eq, and, not, lt, inArray } from 'drizzle-orm';
-import { eventBus } from '@/lib/events/event-bus';
+import { eq, lt } from 'drizzle-orm';
 import { AUTO_RELAY_CONFIG } from '@/lib/constants';
 
 /**
@@ -118,55 +117,32 @@ async function tick() {
   }
 }
 
-/** Mark agents offline if no heartbeat in 5+ minutes */
+/** Run heartbeat check — delegates to per-project heartbeat checker which
+ *  actively probes tmux sessions to distinguish working agents from crashed ones. */
 function runHeartbeatCheck(): { ok: boolean; message: string } {
-  const cutoff = new Date(Date.now() - FIVE_MINUTES).toISOString();
-
-  const staleAgents = db
+  const activeProjects = db
     .select()
-    .from(schema.agentSnapshots)
-    .where(
-      and(
-        not(inArray(schema.agentSnapshots.status, ['offline', 'completed'])),
-        lt(schema.agentSnapshots.lastHeartbeat, cutoff)
-      )
-    )
+    .from(schema.projects)
+    .where(eq(schema.projects.isActive, true))
     .all();
 
-  let marked = 0;
-  for (const agent of staleAgents) {
-    // Only mark offline if lastHeartbeat is actually stale (not null)
-    if (!agent.lastHeartbeat) continue;
-
-    db.update(schema.agentSnapshots)
-      .set({ status: 'offline' })
-      .where(eq(schema.agentSnapshots.id, agent.id))
-      .run();
-
-    eventBus.broadcast('agent.heartbeat_lost', {
-      agentId: agent.agentId,
-      role: agent.role,
-      lastHeartbeat: agent.lastHeartbeat,
-      projectId: agent.projectId,
-    }, agent.projectId);
-
-    // Log event
-    const eventId = `evt-hb-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    db.insert(schema.events).values({
-      id: eventId,
-      projectId: agent.projectId,
-      timestamp: new Date().toISOString(),
-      level: 'warning',
-      agentId: agent.agentId,
-      agentRole: agent.role,
-      message: `Agent ${agent.agentId} marked offline (no heartbeat since ${agent.lastHeartbeat})`,
-      details: null,
-    }).run();
-
-    marked++;
+  if (activeProjects.length === 0) {
+    return { ok: true, message: 'No active projects to check' };
   }
 
-  return { ok: true, message: `Checked heartbeats: ${marked} agents marked offline` };
+  let checked = 0;
+  for (const project of activeProjects) {
+    try {
+      // Dynamic import to avoid circular dependency
+      const { checkStaleAgents } = require('@/lib/coordination/heartbeat-checker');
+      checkStaleAgents(project.id);
+      checked++;
+    } catch (err) {
+      console.error(`Heartbeat check failed for ${project.name}:`, err);
+    }
+  }
+
+  return { ok: true, message: `Checked heartbeats for ${checked} projects` };
 }
 
 /** Delete analytics snapshots older than 30 days */

@@ -61,28 +61,33 @@ export async function syncProject(project: Project) {
     if (hb) agent.lastHeartbeat = hb;
   }
 
-  // Detect stale heartbeats (>5min for non-completed agents)
-  // Respect existing DB status — never downgrade 'completed' agents
-  const now = Date.now();
+  // Preserve existing DB status for completed/offline agents.
+  // Do NOT mark agents offline based on heartbeat alone — that's handled by
+  // heartbeat-checker.ts which actively probes tmux sessions to determine
+  // if the agent is truly done or still working.
   const existingAgents = getProjectAgents(projectId);
   const existingStatusMap = new Map(existingAgents.map((a) => [a.agent_id, a.status]));
-  const staleAgentIds: string[] = [];
+  const existingHbMap = new Map(existingAgents.map((a) => [a.agent_id, a.last_heartbeat]));
   for (const agent of agents) {
-    // If the DB already has this agent as 'completed', preserve that
     const dbStatus = existingStatusMap.get(agent.agentId);
-    if (dbStatus === 'completed') {
-      agent.status = 'completed';
+    // Preserve completed/offline status from DB
+    if (dbStatus === 'completed' || dbStatus === 'offline') {
+      agent.status = dbStatus;
       continue;
     }
-    if (agent.status === 'completed' || agent.status === 'offline') continue;
-    if (agent.lastHeartbeat) {
-      const hbTime = new Date(agent.lastHeartbeat).getTime();
-      if (!isNaN(hbTime) && now - hbTime > HEARTBEAT_THRESHOLDS.warning) {
-        agent.status = 'offline';
-        staleAgentIds.push(agent.agentId);
+    // If heartbeat-checker has refreshed the heartbeat (via tmux probe),
+    // use the DB heartbeat if it's newer than the file-based one
+    const dbHb = existingHbMap.get(agent.agentId);
+    if (dbHb && agent.lastHeartbeat) {
+      const dbTime = new Date(dbHb).getTime();
+      const fileTime = new Date(agent.lastHeartbeat).getTime();
+      if (!isNaN(dbTime) && !isNaN(fileTime) && dbTime > fileTime) {
+        agent.lastHeartbeat = dbHb;
       }
     }
   }
+  // No stale marking here — heartbeat-checker handles it with tmux probing
+  const staleAgentIds: string[] = [];
 
   // Upsert agents into per-project table
   const agentRows: AgentRow[] = agents.map((a) => ({

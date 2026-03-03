@@ -832,9 +832,9 @@ export function PixelOffice({ agents, compact, projectName }: PixelOfficeProps) 
     if (sim.agent.lastHeartbeat &&
         (sim.agent.status === 'working' || sim.agent.status === 'planning')) {
       const hbAge = Date.now() - new Date(sim.agent.lastHeartbeat).getTime();
-      if (hbAge < 60_000) {
+      if (hbAge > 0 && hbAge < 60_000) {
         const pulsePhase = (hbAge % 3000) / 3000;
-        const pulseRadius = 4 + pulsePhase * 8;
+        const pulseRadius = Math.max(1, 4 + pulsePhase * 8);
         ctx.strokeStyle = dotColor;
         ctx.globalAlpha = Math.max(0, 0.6 - pulsePhase * 0.6);
         ctx.lineWidth = 1;
