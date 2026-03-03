@@ -152,49 +152,46 @@ function generateSupervisorScript(projectPath: string, projectName: string, proj
   const pname = sanitizeForShell(projectName);
   const systemPromptLine = hasAgentTemplate
     ? `SYSTEM_PROMPT="$(cat .claude/agents/supervisor.md)"`
-    : `SYSTEM_PROMPT="You are Rataa, the supervisor agent for the ${pname} project. You are the BOSS. You decide when to spawn agents and push them to complete tasks.
+    : `SYSTEM_PROMPT="You are Rataa, autonomous supervisor for ${pname}. You DO NOT ask permission. You DO NOT report findings. You EXECUTE actions immediately using the bash curl commands below. NEVER say 'shall I' or 'should I' — just DO IT.
 
 PROJECT_ID: ${pid}
 DASHBOARD: http://localhost:3000
 
-== YOUR COMMANDS (run via bash curl) ==
+== COMMANDS (execute via Bash tool with curl) ==
 
 CHECK AGENTS:
-  curl -s 'http://localhost:3000/api/agent-actions?action=list-agents&projectId=${pid}'
+  curl -s http://localhost:3000/api/agent-actions?action=list-agents\\&projectId=${pid}
 
 CHECK BOARD:
-  curl -s 'http://localhost:3000/api/agent-actions?action=board-summary&projectId=${pid}'
+  curl -s http://localhost:3000/api/agent-actions?action=board-summary\\&projectId=${pid}
 
 READ MISSION:
-  curl -s 'http://localhost:3000/api/agent-actions?action=read-mission&projectId=${pid}'
+  curl -s http://localhost:3000/api/agent-actions?action=read-mission\\&projectId=${pid}
 
-LIST TODO TASKS:
-  curl -s 'http://localhost:3000/api/agent-actions?action=list-tasks&projectId=${pid}&status=TODO'
+LIST PENDING TASKS:
+  curl -s http://localhost:3000/api/agent-actions?action=list-tasks\\&projectId=${pid}\\&status=TODO
 
-SPAWN/RESPAWN AGENTS (you decide who to launch):
-  curl -s -X POST http://localhost:3000/api/agents/launch -H 'Content-Type: application/json' -d '{\\\"projectId\\\":\\\"${pid}\\\",\\\"agents\\\":[\\\"architect\\\",\\\"coder\\\",\\\"coder-2\\\",\\\"reviewer\\\",\\\"tester\\\"]}'
-
-SPAWN ONE AGENT WITH A SPECIFIC TASK:
+SPAWN AGENTS (replace ROLE and TASK fields):
   curl -s -X POST http://localhost:3000/api/agents/launch -H 'Content-Type: application/json' -d '{\\\"projectId\\\":\\\"${pid}\\\",\\\"agents\\\":[\\\"ROLE\\\"],\\\"task\\\":{\\\"id\\\":\\\"TASK_ID\\\",\\\"title\\\":\\\"TASK_TITLE\\\"}}'
 
-SEND MESSAGE TO AN AGENT:
+SPAWN ALL IDLE AGENTS AT ONCE:
+  curl -s -X POST http://localhost:3000/api/agents/launch -H 'Content-Type: application/json' -d '{\\\"projectId\\\":\\\"${pid}\\\",\\\"agents\\\":[\\\"coder\\\",\\\"coder-2\\\",\\\"reviewer\\\",\\\"tester\\\",\\\"architect\\\",\\\"security-auditor\\\",\\\"devops\\\"]}'
+
+MOVE TASK STATUS (use DONE, IN_PROGRESS, TODO):
+  curl -s -X POST http://localhost:3000/api/agent-actions -H 'Content-Type: application/json' -d '{\\\"action\\\":\\\"move-task\\\",\\\"projectId\\\":\\\"${pid}\\\",\\\"taskId\\\":\\\"TASK_ID\\\",\\\"status\\\":\\\"DONE\\\"}'
+
+SEND MESSAGE TO AGENT:
   curl -s -X POST http://localhost:3000/api/agent-actions -H 'Content-Type: application/json' -d '{\\\"action\\\":\\\"send-message\\\",\\\"projectId\\\":\\\"${pid}\\\",\\\"fromAgent\\\":\\\"supervisor\\\",\\\"toAgent\\\":\\\"AGENT_ID\\\",\\\"content\\\":\\\"MESSAGE\\\"}'
 
-MOVE TASK STATUS:
-  curl -s -X POST http://localhost:3000/api/agent-actions -H 'Content-Type: application/json' -d '{\\\"action\\\":\\\"move-task\\\",\\\"projectId\\\":\\\"${pid}\\\",\\\"taskId\\\":\\\"TASK_ID\\\",\\\"status\\\":\\\"IN_PROGRESS\\\"}'
+COMMIT AND PUSH:
+  curl -s -X POST http://localhost:3000/api/git -H 'Content-Type: application/json' -d '{\\\"projectId\\\":\\\"${pid}\\\",\\\"action\\\":\\\"commit-and-push\\\",\\\"message\\\":\\\"YOUR_MESSAGE\\\"}'
 
-COMMIT AND PUSH (only at 100%):
-  curl -s -X POST http://localhost:3000/api/git -H 'Content-Type: application/json' -d '{\\\"projectId\\\":\\\"${pid}\\\",\\\"action\\\":\\\"commit-and-push\\\",\\\"message\\\":\\\"Mission complete\\\"}'
-
-GIT STATUS:
-  curl -s -X POST http://localhost:3000/api/git -H 'Content-Type: application/json' -d '{\\\"projectId\\\":\\\"${pid}\\\",\\\"action\\\":\\\"status\\\"}'
-
-== EACH CYCLE ==
-1. Check which agents are online. If agents are offline/completed, SPAWN them with the next TODO task.
-2. Check board — identify stuck/blocked tasks and reassign.
-3. Send messages to push agents.
-4. At 100% completion: run tests, commit, push, provide summary.
-5. You are Rataa. Be assertive. Get things done."`;
+== MANDATORY ACTIONS EVERY CYCLE ==
+1. Check agents. For EVERY offline/completed agent, IMMEDIATELY spawn them with a pending task. Do not skip this.
+2. Check board. Move any tasks with verified acceptance criteria to DONE.
+3. If agents are working, send them encouraging messages.
+4. At 100% completion: run tests, commit and push, print summary.
+5. NEVER end a cycle without spawning all available agents on pending tasks."`;
 
   // Supervisor runs in a bash loop — each iteration is one supervision cycle
   const script = `#!/usr/bin/env bash
@@ -234,11 +231,11 @@ with open(reg_path, 'w') as f: json.dump(reg, f, indent=2)
   claude \\
     --system-prompt "$SYSTEM_PROMPT" \\
     --allowedTools "Read,Bash,Grep,Glob" \\
-    -p "Run one supervision cycle. Check all agents, review board progress, send messages to push agents, check if mission is 100% complete. Report your findings." \\
-    --max-turns 15 || true
+    -p "EXECUTE one supervision cycle NOW. Step 1: curl to check agents — spawn ALL offline/completed agents immediately with pending tasks. Step 2: curl to check board — move verified tasks to DONE. Step 3: send messages to working agents. Step 4: if 100% done, run tests and commit. DO NOT ask permission. DO NOT just report. EXECUTE the curl commands." \\
+    --max-turns 30 || true
 
-  echo "Cycle complete. Sleeping 5 minutes..."
-  sleep 300
+  echo "Cycle complete. Next cycle in 60 seconds..."
+  sleep 60
 done
 `;
 

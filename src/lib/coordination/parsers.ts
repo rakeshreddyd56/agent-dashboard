@@ -476,13 +476,23 @@ function parseStructuredTasks(content: string, projectId: string): Task[] {
 
       switch (fieldLower) {
         case 'status': {
-          // Strip emoji prefixes (✅, 🔴, 🟡, 🟢, ⏳, etc.) and clean up
+          // Strip emoji prefixes (✅, 🔴, 🟡, 🟢, 🟠, 🟣, ⏳, 🛑, ❌, ⚠️, 🔵, 🔍) and clean up
           // Also strip parenthetical notes like "(maps to queue TASK-007)"
           const cleanStatus = valueTrimmed
-            .replace(/^[\u2705\u{1F534}\u{1F7E1}\u{1F7E2}\u{1F7E0}\u{1F7E3}\u23F3\u{1F6D1}\u274C\u26A0\uFE0F]/u, '')
+            .replace(/^[\u2705\u{1F534}\u{1F7E1}\u{1F7E2}\u{1F7E0}\u{1F7E3}\u23F3\u{1F6D1}\u274C\u26A0\uFE0F\u{1F535}\u{1F50D}]\s*/u, '')
             .replace(/\s*\(.*\)\s*$/, '')
             .trim().toLowerCase();
-          currentTask.status = structuredStatusMap[cleanStatus] || 'BACKLOG';
+          // Try exact match first, then first-word match (handles "fixed by coder", "complete + verified", etc.)
+          let mapped = structuredStatusMap[cleanStatus];
+          if (!mapped) {
+            const firstWord = cleanStatus.split(/[\s,+&\-—]/)[0].trim();
+            mapped = structuredStatusMap[firstWord];
+          }
+          // Also handle "low-risk" as a done-like status (verified items)
+          if (!mapped && (cleanStatus.includes('low-risk') || cleanStatus.includes('verified') || cleanStatus.includes('hardened'))) {
+            mapped = 'DONE';
+          }
+          currentTask.status = mapped || 'BACKLOG';
           break;
         }
         case 'priority': {
