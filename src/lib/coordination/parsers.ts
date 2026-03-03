@@ -355,6 +355,7 @@ export function parseEventsLog(coordinationPath: string, projectId: string, afte
 // Parse TASKS.md -> Task[]
 export function parseTasksMd(projectRoot: string, projectId: string): Task[] {
   const candidates = [
+    path.join(projectRoot, '.claude', 'coordination', 'TASKS.md'),
     path.join(projectRoot, 'docs', 'TASKS.md'),
     path.join(projectRoot, 'TASKS.md'),
     path.join(projectRoot, 'tasks.md'),
@@ -384,16 +385,27 @@ function parseStructuredTasks(content: string, projectId: string): Task[] {
   const structuredStatusMap: Record<string, TaskStatus> = {
     backlog: 'BACKLOG',
     todo: 'TODO',
+    open: 'TODO',
+    pending: 'TODO',
     assigned: 'ASSIGNED',
     'in progress': 'IN_PROGRESS',
     'in-progress': 'IN_PROGRESS',
+    'in_progress': 'IN_PROGRESS',
     implementing: 'IN_PROGRESS',
+    working: 'IN_PROGRESS',
+    active: 'IN_PROGRESS',
     failed: 'FAILED',
+    critical: 'TODO',
     review: 'REVIEW',
+    'code review': 'REVIEW',
     testing: 'TESTING',
     tested: 'TESTED',
     done: 'DONE',
     completed: 'DONE',
+    complete: 'DONE',
+    fixed: 'DONE',
+    resolved: 'DONE',
+    closed: 'DONE',
   };
 
   let currentTask: {
@@ -412,8 +424,8 @@ function parseStructuredTasks(content: string, projectId: string): Task[] {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
 
-    // Match: ### TASK-ID: Title
-    const headerMatch = line.match(/^###\s+([\w-]+):\s+(.+)$/);
+    // Match: ###/####/##### TASK-ID: Title  OR  TASK-ID — Title  OR  TASK-ID - Title
+    const headerMatch = line.match(/^#{3,5}\s+([\w-]+)\s*[:\u2014\u2013\-]+\s+(.+)$/);
     if (headerMatch) {
       // Save previous task
       if (currentTask) {
@@ -459,8 +471,14 @@ function parseStructuredTasks(content: string, projectId: string): Task[] {
 
       switch (fieldLower) {
         case 'status':
-          currentTask.status = structuredStatusMap[valueTrimmed.toLowerCase()] || 'BACKLOG';
+        case 'status:': {
+          // Strip emoji prefixes (✅, 🔴, 🟡, 🟢, ⏳, etc.) and clean up
+          const cleanStatus = valueTrimmed
+            .replace(/^[\u2705\u{1F534}\u{1F7E1}\u{1F7E2}\u{1F7E0}\u{1F7E3}\u23F3\u{1F6D1}\u274C]/u, '')
+            .trim().toLowerCase();
+          currentTask.status = structuredStatusMap[cleanStatus] || 'BACKLOG';
           break;
+        }
         case 'priority':
           if (/^P[0-3]$/i.test(valueTrimmed)) {
             currentTask.priority = valueTrimmed.toUpperCase() as TaskPriority;
@@ -468,8 +486,19 @@ function parseStructuredTasks(content: string, projectId: string): Task[] {
           break;
         case 'assigned to':
         case 'assigned':
+        case 'assignee':
         case 'agent':
+        case 'owner':
           currentTask.assignedAgent = valueTrimmed || undefined;
+          break;
+        case 'action':
+        case 'completed':
+        case 'files':
+        case 'findings':
+          // Known metadata fields — capture as description supplement if no description yet
+          if (!currentTask.description && valueTrimmed) {
+            currentTask.description = valueTrimmed;
+          }
           break;
         case 'description':
           currentTask.description = valueTrimmed || undefined;
