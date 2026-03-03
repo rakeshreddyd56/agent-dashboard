@@ -64,6 +64,7 @@ export function VelocityChart({ data, loading }: VelocityChartProps) {
                 labelStyle={{ color: '#a1a1aa' }}
                 itemStyle={{ color: '#e4e4e7' }}
                 cursor={{ fill: 'rgba(255,255,255,0.05)' }}
+                formatter={(value: number | undefined) => [typeof value === 'number' && Number.isFinite(value) ? value : 0]}
               />
               <Legend wrapperStyle={{ fontSize: 11, color: '#a1a1aa' }} />
               <Bar dataKey="completed" stackId="tasks" fill="#4ade80" name="Done" radius={[0, 0, 0, 0]} />

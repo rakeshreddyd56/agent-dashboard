@@ -75,6 +75,7 @@ export function BurndownChart({ snapshots, totalTasks, loading }: BurndownChartP
               <YAxis tick={TICK_STYLE} />
               <Tooltip
                 contentStyle={{ backgroundColor: '#18181b', border: '1px solid #3f3f46', borderRadius: 8, fontSize: 12 }}
+                formatter={(value: number | undefined) => [typeof value === 'number' && Number.isFinite(value) ? value : 0]}
               />
               <Area type="monotone" dataKey="ideal" stroke="#4ade80" fill="#4ade80" fillOpacity={0.1} strokeDasharray="5 5" name="Ideal" />
               <Area type="monotone" dataKey="remaining" stroke="#818cf8" fill="#818cf8" fillOpacity={0.2} name="Remaining" />

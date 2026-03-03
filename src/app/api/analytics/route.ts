@@ -44,7 +44,17 @@ export async function GET(req: NextRequest) {
     }
 
     // 1. DB snapshots (task velocity, agent activity over time)
-    const snapshots = getProjectAnalytics(projectId, { limit }).reverse(); // oldest first for charts
+    const rawSnapshots = getProjectAnalytics(projectId, { limit }).reverse(); // oldest first for charts
+    const snapshots = rawSnapshots.map((s) => ({
+      id: s.id,
+      projectId,
+      timestamp: s.timestamp,
+      activeAgents: s.active_agents ?? 0,
+      tasksInProgress: s.tasks_in_progress ?? 0,
+      tasksCompleted: s.tasks_completed ?? 0,
+      totalTasks: s.total_tasks ?? 0,
+      estimatedCost: s.estimated_cost ?? 0,
+    }));
 
     // 2. Current task breakdown by status
     const tasks = getProjectTasks(projectId);
