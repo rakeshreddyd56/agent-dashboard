@@ -29,17 +29,28 @@ export default function AgentsPage() {
 
   const handleLaunchAll = async () => {
     if (!activeProjectId || launching) return;
+    // Collect offline/completed agent roles to relaunch
+    const respawnRoles = agents
+      .filter((a) => a.status === 'offline' || a.status === 'completed')
+      .map((a) => a.agentId);
+    if (respawnRoles.length === 0) return;
+
     setLaunching(true);
     setLaunchMsg(null);
     try {
       const res = await fetch('/api/agents/launch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId: activeProjectId, launchAll: true }),
+        body: JSON.stringify({ projectId: activeProjectId, agents: respawnRoles }),
       });
       const data = await res.json();
-      if (data.launched) {
-        setLaunchMsg('All agents launched');
+      if (data.results) {
+        const launched = data.results.filter((r: { status: string }) => r.status === 'launched').length;
+        const errors = data.results.filter((r: { status: string }) => r.status === 'error').length;
+        const parts: string[] = [];
+        if (launched > 0) parts.push(`${launched} launched`);
+        if (errors > 0) parts.push(`${errors} failed`);
+        setLaunchMsg(parts.join(', ') || 'No agents processed');
       } else {
         setLaunchMsg(data.error || 'Launch failed');
       }
