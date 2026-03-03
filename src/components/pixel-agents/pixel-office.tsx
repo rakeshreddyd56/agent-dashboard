@@ -87,10 +87,10 @@ for (let r = 2; r <= 5; r++) {
   if (LAYOUT[p.y]) LAYOUT[p.y][p.x] = 4;
 });
 
-// Coffee area items
-[{ x: 16, y: 10 }, { x: 17, y: 10 }].forEach(p => {
-  if (LAYOUT[p.y]) LAYOUT[p.y][p.x] = 4;
-});
+// Supervisor cubicle (Rataa's office)
+const SUPERVISOR_DESK: Vec = { x: 17, y: 10 };
+if (LAYOUT[10]) { LAYOUT[10][16] = 4; LAYOUT[10][17] = 2; LAYOUT[10][18] = 4; }
+if (LAYOUT[11]) LAYOUT[11][17] = 3;
 
 /* ───────── furniture defs ───────── */
 const FURNITURE: FurnitureItem[] = [
@@ -110,9 +110,11 @@ const FURNITURE: FurnitureItem[] = [
   { img: '/pixel-agents/furniture/electronics/SERVER.png', x: 16, y: 8, w: 16, h: 32 },
   { img: '/pixel-agents/furniture/electronics/SERVER.png', x: 17, y: 8, w: 16, h: 32 },
   { img: '/pixel-agents/furniture/electronics/PRINTER_DESKTOP.png', x: 18, y: 8, w: 16, h: 32 },
-  // Coffee corner
-  { img: '/pixel-agents/furniture/misc/COFFEE_MACHINE.png', x: 16, y: 10, w: 16, h: 32 },
-  { img: '/pixel-agents/furniture/misc/COFFEE_MUG.png', x: 17, y: 10, w: 16, h: 16 },
+  // Supervisor Rataa's cubicle
+  { img: '/pixel-agents/furniture/desks/DEFAULT_DESK.png', x: 17, y: 10, w: 32, h: 32 },
+  { img: '/pixel-agents/furniture/electronics/MONITOR_CRT_ON.png', x: 16, y: 10, w: 16, h: 16 },
+  { img: '/pixel-agents/furniture/chairs/CHAIR_ROTATING_FRONT.png', x: 17, y: 11, w: 16, h: 16 },
+  { img: '/pixel-agents/furniture/misc/COFFEE_MUG.png', x: 18, y: 10, w: 16, h: 16 },
   // Decor
   { img: '/pixel-agents/furniture/misc/BIN.png', x: 15, y: 12, w: 16, h: 16 },
   { img: '/pixel-agents/furniture/misc/BIN.png', x: 1, y: 12, w: 16, h: 16 },
@@ -122,7 +124,8 @@ const FURNITURE: FurnitureItem[] = [
 const CHAR_MAP: Record<string, number> = {
   architect: 0, 'coder-1': 1, coder: 1, 'coder-2': 2,
   reviewer: 3, tester: 4, 'security-auditor': 5, security: 5,
-  devops: 0, coordinator: 3, 'ui-builder': 2, 'ui-polish': 4, 'ui-tester': 1,
+  devops: 0, coordinator: 3, supervisor: 5,
+  'ui-builder': 2, 'ui-polish': 4, 'ui-tester': 1,
 };
 
 const STATUS_COLOR: Record<string, string> = {
@@ -238,7 +241,7 @@ export function PixelOffice({ agents, compact, projectName }: PixelOfficeProps) 
     const existing = simsRef.current;
     const newSims: AgentSim[] = visible.map((agent, idx) => {
       const prev = existing.find(s => s.id === agent.agentId);
-      const desk = DESK_TILES[idx % DESK_TILES.length];
+      const desk = agent.role === 'supervisor' ? SUPERVISOR_DESK : DESK_TILES[idx % DESK_TILES.length];
       const chairTile = { x: desk.x, y: desk.y + 1 };
 
       if (prev) {
@@ -367,6 +370,9 @@ export function PixelOffice({ agents, compact, projectName }: PixelOfficeProps) 
       ctx.fillText('Work Area', 7 * T, T * 0.35);
       ctx.fillText('Break Room', 17 * T, T * 0.35);
       ctx.fillText('Server', 17 * T, 7.35 * T);
+      ctx.fillStyle = '#9333ea';
+      ctx.fillText('Rataa', 17 * T, 9.35 * T);
+      ctx.fillStyle = '#8a7050';
       // Divider line between work area and break/server area
       ctx.strokeStyle = '#4a3828';
       ctx.lineWidth = 2;

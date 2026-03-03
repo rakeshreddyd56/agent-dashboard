@@ -6,6 +6,7 @@ import {
   Shield,
   Container,
   Users,
+  Eye,
   Bot,
 } from 'lucide-react';
 import type { AgentRole } from '@/lib/types';
@@ -19,6 +20,7 @@ const iconMap: Record<AgentRole, React.ComponentType<{ className?: string }>> = 
   'security-auditor': Shield,
   devops: Container,
   coordinator: Users,
+  supervisor: Eye,
 };
 
 const colorMap: Record<AgentRole, string> = {
@@ -30,6 +32,7 @@ const colorMap: Record<AgentRole, string> = {
   'security-auditor': 'text-[#e05252]',
   devops: 'text-[#f5b942]',
   coordinator: 'text-[#24556f]',
+  supervisor: 'text-[#9333ea]',
 };
 
 export function RoleIcon({ role, className }: { role: AgentRole; className?: string }) {

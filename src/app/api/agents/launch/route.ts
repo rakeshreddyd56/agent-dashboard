@@ -136,6 +136,87 @@ exec claude \\
   return scriptPath;
 }
 
+function generateSupervisorScript(projectPath: string, projectName: string, projectId: string): string {
+  const scriptsDir = path.join(projectPath, 'scripts');
+  if (!fs.existsSync(scriptsDir)) {
+    fs.mkdirSync(scriptsDir, { recursive: true });
+  }
+
+  const scriptPath = path.join(scriptsDir, 'run-supervisor.sh');
+
+  // Check if there's a custom agent template
+  const agentMdPath = path.join(projectPath, '.claude', 'agents', 'supervisor.md');
+  const hasAgentTemplate = fs.existsSync(agentMdPath);
+
+  const systemPromptLine = hasAgentTemplate
+    ? `SYSTEM_PROMPT="$(cat .claude/agents/supervisor.md)"`
+    : `SYSTEM_PROMPT="You are Rataa, the supervisor agent for the ${sanitizeForShell(projectName)} project.
+
+Your job is to monitor all agents and push them to complete their tasks. You run in a continuous loop.
+
+Each cycle you must:
+1. Check agent status: curl -s http://localhost:3000/api/agent-actions?action=list-agents\\&projectId=${sanitizeForShell(projectId)}
+2. Check board progress: curl -s http://localhost:3000/api/agent-actions?action=board-summary\\&projectId=${sanitizeForShell(projectId)}
+3. Read the mission: curl -s http://localhost:3000/api/agent-actions?action=read-mission\\&projectId=${sanitizeForShell(projectId)}
+4. Send messages to agents who are idle or stuck:
+   curl -s -X POST http://localhost:3000/api/agent-actions -H 'Content-Type: application/json' -d '{\\\"action\\\":\\\"send-message\\\",\\\"projectId\\\":\\\"${sanitizeForShell(projectId)}\\\",\\\"fromAgent\\\":\\\"supervisor\\\",\\\"toAgent\\\":\\\"AGENT_ID\\\",\\\"content\\\":\\\"YOUR_MESSAGE\\\"}'
+5. When ALL tasks are DONE or TESTED (100% completion):
+   a. Start a test server: cd PROJECT_DIR && npm run dev (or next dev) in background
+   b. Commit and push: curl -s -X POST http://localhost:3000/api/git -H 'Content-Type: application/json' -d '{\\\"projectId\\\":\\\"${sanitizeForShell(projectId)}\\\",\\\"action\\\":\\\"commit-and-push\\\",\\\"message\\\":\\\"Mission complete - all tasks done\\\"}'
+   c. Print a summary of all completed work
+
+Report your findings clearly each cycle. You are the boss - be direct and push agents to finish."`;
+
+  // Supervisor runs in a bash loop — each iteration is one supervision cycle
+  const script = `#!/usr/bin/env bash
+# Supervisor (Rataa) runner script — loops every 5 minutes
+# Project: ${sanitizeForShell(projectName)}
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+unset CLAUDECODE
+
+COORD_DIR=".claude/coordination"
+REGISTRY="\${COORD_DIR}/registry.json"
+mkdir -p "\${COORD_DIR}"
+
+${systemPromptLine}
+
+while true; do
+  NOW=\$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
+
+  # Update heartbeat in registry
+  if command -v python3 &>/dev/null; then
+    python3 -c "
+import json
+reg_path = '\${REGISTRY}'
+try:
+    with open(reg_path) as f: reg = json.load(f)
+except: reg = {'agents': []}
+if not isinstance(reg.get('agents'), list): reg['agents'] = []
+agents = [a for a in reg['agents'] if a.get('name') != 'supervisor']
+agents.append({'name': 'supervisor', 'role': 'supervisor', 'status': 'working', 'current_task': 'supervision', 'session_start': '\${NOW}', 'last_heartbeat': '\${NOW}'})
+reg['agents'] = agents
+with open(reg_path, 'w') as f: json.dump(reg, f, indent=2)
+" 2>/dev/null || true
+  fi
+
+  echo "=== Supervision cycle at \$(date) ==="
+  claude \\
+    --system-prompt "$SYSTEM_PROMPT" \\
+    --allowedTools "Read,Bash,Grep,Glob" \\
+    -p "Run one supervision cycle. Check all agents, review board progress, send messages to push agents, check if mission is 100% complete. Report your findings." \\
+    --max-turns 15 || true
+
+  echo "Cycle complete. Sleeping 5 minutes..."
+  sleep 300
+done
+`;
+
+  fs.writeFileSync(scriptPath, script, { mode: 0o755 });
+  return scriptPath;
+}
+
 // Register a launched agent in DB + coordination files so it appears immediately
 function registerLaunchedAgent(projectId: string, role: string, coordinationPath: string): void {
   const now = new Date().toISOString();
@@ -446,6 +527,14 @@ export async function POST(req: NextRequest) {
         }
       } else {
         scriptFile = `run-${sanitizedRole}.sh`;
+      }
+
+      // Supervisor gets a special looping script
+      if (sanitizedRole === 'supervisor' && !taskInfo?.id) {
+        try {
+          generateSupervisorScript(project.path, project.name, projectId as string);
+          scriptFile = 'run-supervisor.sh';
+        } catch { /* fall through to standard generation */ }
       }
 
       // Auto-generate standard run script if it doesn't exist

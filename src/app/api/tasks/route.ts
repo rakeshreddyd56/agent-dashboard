@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
     createProjectTables(projectId);
   }
 
-  const tasks = getProjectTasks(projectId).map((t) => ({
+  const rawTasks = getProjectTasks(projectId).map((t) => ({
     id: t.id,
     projectId,
     externalId: t.external_id,
@@ -41,6 +41,16 @@ export async function GET(req: NextRequest) {
     createdAt: t.created_at,
     updatedAt: t.updated_at,
   }));
+
+  // Deduplicate by externalId — prefer tasks_md over coordination source
+  const seenExt = new Set<string>();
+  const tasks = rawTasks
+    .sort((a, b) => (a.source === 'tasks_md' ? -1 : b.source === 'tasks_md' ? 1 : 0))
+    .filter((t) => {
+      if (t.externalId && seenExt.has(t.externalId)) return false;
+      if (t.externalId) seenExt.add(t.externalId);
+      return true;
+    });
 
   return NextResponse.json({ tasks });
 }

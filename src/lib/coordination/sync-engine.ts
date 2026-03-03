@@ -146,12 +146,44 @@ export async function syncProject(project: Project) {
   eventBus.broadcast('lock.updated', { locks }, projectId);
 
   // 3. Sync tasks from queue.json and TASKS.md into per-project table
+  // Deduplicate: same task can appear in both sources. TASKS.md is
+  // authoritative for metadata, queue.json for status.
   const queueTasks = parseQueue(coordinationPath, projectId);
   const mdTasks = parseTasksMd(projectPath, projectId);
-  const allTasks = [...queueTasks, ...mdTasks];
 
-  // Convert to TaskRow format and replace coordination/tasks_md sourced tasks
-  const coordTaskRows: TaskRow[] = allTasks.map((t) => ({
+  const mdByExtId = new Map<string, typeof mdTasks[0]>();
+  for (const t of mdTasks) {
+    if (t.externalId) mdByExtId.set(t.externalId, t);
+  }
+
+  const mergedTasks: typeof mdTasks = [];
+  const seenExtIds = new Set<string>();
+
+  for (const qt of queueTasks) {
+    const extId = qt.externalId;
+    if (extId && mdByExtId.has(extId)) {
+      // Merge: md metadata + queue status override
+      const md = mdByExtId.get(extId)!;
+      mergedTasks.push({
+        ...md,
+        status: qt.status, // queue.json status is more current
+        assignedAgent: qt.assignedAgent || md.assignedAgent,
+        source: 'tasks_md' as const,
+      });
+      seenExtIds.add(extId);
+    } else {
+      mergedTasks.push(qt);
+    }
+  }
+
+  // Add remaining TASKS.md tasks not in queue
+  for (const mt of mdTasks) {
+    if (mt.externalId && seenExtIds.has(mt.externalId)) continue;
+    mergedTasks.push(mt);
+  }
+
+  // Convert to TaskRow format
+  const coordTaskRows: TaskRow[] = mergedTasks.map((t) => ({
     id: t.id,
     external_id: t.externalId || null,
     title: t.title,
@@ -172,7 +204,7 @@ export async function syncProject(project: Project) {
   bulkReplaceProjectTasks(projectId, coordTaskRows.filter((t) => t.source === 'coordination'), 'coordination');
   bulkReplaceProjectTasks(projectId, coordTaskRows.filter((t) => t.source === 'tasks_md'), 'tasks_md');
 
-  eventBus.broadcast('task.synced', { tasks: allTasks }, projectId);
+  eventBus.broadcast('task.synced', { tasks: mergedTasks }, projectId);
 
   // 4. Sync events (incremental) into per-project table
   const currentOffset = eventOffsets.get(projectId) || 0;

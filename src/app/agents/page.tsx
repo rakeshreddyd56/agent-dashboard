@@ -13,7 +13,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ErrorBoundary } from '@/components/shared/error-boundary';
 import { SkeletonAgentGrid } from '@/components/shared/skeletons';
-import { Rocket, RotateCcw } from 'lucide-react';
+import { Rocket, RotateCcw, Eye } from 'lucide-react';
 
 export default function AgentsPage() {
   const allAgents = useAgentStore((s) => s.agents);
@@ -26,34 +26,73 @@ export default function AgentsPage() {
 
   const offlineCount = agents.filter((a) => a.status === 'offline' || a.status === 'completed').length;
   const activeCount = agents.filter((a) => ['working', 'planning', 'reviewing'].includes(a.status)).length;
+  const hasSupervisor = agents.some((a) => a.role === 'supervisor' && a.status === 'working');
 
   const handleLaunchAll = async () => {
     if (!activeProjectId || launching) return;
-    // Collect offline/completed agent roles to relaunch
     const respawnRoles = agents
-      .filter((a) => a.status === 'offline' || a.status === 'completed')
+      .filter((a) => (a.status === 'offline' || a.status === 'completed') && a.role !== 'supervisor')
       .map((a) => a.agentId);
     if (respawnRoles.length === 0) return;
 
     setLaunching(true);
     setLaunchMsg(null);
     try {
+      // Fetch available TODO tasks from the board
+      const taskRes = await fetch(
+        `/api/agent-actions?action=list-tasks&projectId=${activeProjectId}&status=TODO`
+      );
+      const taskData = await taskRes.json();
+      const availableTasks: { id: string; title: string }[] = (taskData.tasks || [])
+        .map((t: { id: string; title: string }) => ({ id: t.id, title: t.title }));
+
+      // Launch each agent with next available task
+      const results: { role: string; status: string }[] = [];
+      for (let i = 0; i < respawnRoles.length; i++) {
+        const role = respawnRoles[i];
+        const task = availableTasks[i]; // one task per agent, or undefined
+
+        const res = await fetch('/api/agents/launch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            projectId: activeProjectId,
+            agents: [role],
+            ...(task ? { task: { id: task.id, title: task.title } } : {}),
+          }),
+        });
+        const data = await res.json();
+        if (data.results) {
+          results.push(...data.results);
+        }
+      }
+
+      const launched = results.filter((r) => r.status === 'launched').length;
+      const errors = results.filter((r) => r.status === 'error').length;
+      const parts: string[] = [];
+      if (launched > 0) parts.push(`${launched} launched`);
+      if (errors > 0) parts.push(`${errors} failed`);
+      setLaunchMsg(parts.join(', ') || 'No agents processed');
+    } catch {
+      setLaunchMsg('Launch failed');
+    } finally {
+      setLaunching(false);
+      setTimeout(() => setLaunchMsg(null), 5000);
+    }
+  };
+
+  const handleLaunchSupervisor = async () => {
+    if (!activeProjectId || launching) return;
+    setLaunching(true);
+    setLaunchMsg(null);
+    try {
       const res = await fetch('/api/agents/launch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId: activeProjectId, agents: respawnRoles }),
+        body: JSON.stringify({ projectId: activeProjectId, agents: ['supervisor'] }),
       });
       const data = await res.json();
-      if (data.results) {
-        const launched = data.results.filter((r: { status: string }) => r.status === 'launched').length;
-        const errors = data.results.filter((r: { status: string }) => r.status === 'error').length;
-        const parts: string[] = [];
-        if (launched > 0) parts.push(`${launched} launched`);
-        if (errors > 0) parts.push(`${errors} failed`);
-        setLaunchMsg(parts.join(', ') || 'No agents processed');
-      } else {
-        setLaunchMsg(data.error || 'Launch failed');
-      }
+      setLaunchMsg(data.results?.[0]?.status === 'launched' ? 'Rataa launched' : 'Launch failed');
     } catch {
       setLaunchMsg('Launch failed');
     } finally {
@@ -71,6 +110,18 @@ export default function AgentsPage() {
             <Badge variant="secondary" className="text-[10px]">{activeCount} active</Badge>
             <Badge variant="outline" className="text-[10px]">{offlineCount} idle</Badge>
           </div>
+          {!hasSupervisor && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 gap-1.5 text-xs text-[#9333ea] border-[#9333ea]/30 hover:bg-[#9333ea]/10"
+              onClick={handleLaunchSupervisor}
+              disabled={launching}
+            >
+              <Eye className="h-3.5 w-3.5" />
+              Launch Rataa
+            </Button>
+          )}
           {offlineCount > 0 && (
             <Button
               variant="outline"
@@ -88,7 +139,7 @@ export default function AgentsPage() {
             </Button>
           )}
           {launchMsg && (
-            <span className={`text-xs ${launchMsg.includes('launched') ? 'text-[#3dba8a]' : 'text-[#e05252]'}`}>
+            <span className={`text-xs ${launchMsg.includes('launched') || launchMsg.includes('Rataa') ? 'text-[#3dba8a]' : 'text-[#e05252]'}`}>
               {launchMsg}
             </span>
           )}

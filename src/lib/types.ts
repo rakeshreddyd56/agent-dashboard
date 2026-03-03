@@ -1,6 +1,6 @@
 // Core domain types for the Multi-Agent Dashboard
 
-export type AgentRole = 'architect' | 'coder' | 'coder-2' | 'reviewer' | 'tester' | 'security-auditor' | 'devops' | 'coordinator';
+export type AgentRole = 'architect' | 'coder' | 'coder-2' | 'reviewer' | 'tester' | 'security-auditor' | 'devops' | 'coordinator' | 'supervisor';
 
 export type AgentStatus = 'initializing' | 'planning' | 'working' | 'blocked' | 'reviewing' | 'completed' | 'idle' | 'offline';
 
