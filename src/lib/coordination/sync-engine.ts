@@ -200,6 +200,34 @@ export async function syncProject(project: Project) {
     updated_at: t.updatedAt,
   }));
 
+  // Preserve task statuses that were advanced by relay/agents (don't downgrade).
+  // If a task is currently IN_PROGRESS or DONE in the DB, keep that status
+  // unless the file-parsed status is also advanced (e.g., file says DONE).
+  const STATUS_RANK: Record<string, number> = {
+    'BACKLOG': 0, 'TODO': 1, 'ASSIGNED': 2, 'IN_PROGRESS': 3,
+    'REVIEW': 4, 'TESTING': 5, 'TESTED': 6, 'DONE': 7, 'FAILED': 2,
+  };
+  const existingTasks = getProjectTasks(projectId);
+  const existingStatusByExtId = new Map<string, string>();
+  const existingStatusById = new Map<string, string>();
+  for (const t of existingTasks) {
+    if (t.external_id) existingStatusByExtId.set(t.external_id, t.status);
+    existingStatusById.set(t.id, t.status);
+  }
+
+  for (const row of coordTaskRows) {
+    const dbStatus = (row.external_id && existingStatusByExtId.get(row.external_id))
+      || existingStatusById.get(row.id);
+    if (dbStatus) {
+      const dbRank = STATUS_RANK[dbStatus] ?? 0;
+      const fileRank = STATUS_RANK[row.status] ?? 0;
+      // Don't downgrade: keep DB status if it's more advanced
+      if (dbRank > fileRank) {
+        row.status = dbStatus;
+      }
+    }
+  }
+
   // Replace coordination-sourced tasks, then tasks_md-sourced tasks
   bulkReplaceProjectTasks(projectId, coordTaskRows.filter((t) => t.source === 'coordination'), 'coordination');
   bulkReplaceProjectTasks(projectId, coordTaskRows.filter((t) => t.source === 'tasks_md'), 'tasks_md');

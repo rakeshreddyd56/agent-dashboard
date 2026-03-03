@@ -92,7 +92,8 @@ export function updateProjectTask(projectId: string, taskId: string, updates: Pa
 }
 
 /**
- * Find the highest-priority TODO task for a given role (or unassigned).
+ * Find the highest-priority pending task for a given role (or unassigned).
+ * Searches TODO and BACKLOG statuses — both represent unstarted work.
  * Priority order: P0 > P1 > P2 > P3, then by column_order ASC.
  */
 export function getNextPendingTask(projectId: string, role?: string): TaskRow | undefined {
@@ -100,8 +101,9 @@ export function getNextPendingTask(projectId: string, role?: string): TaskRow | 
   if (role) {
     return rawDb.prepare(`
       SELECT * FROM "${p}_tasks"
-      WHERE status = 'TODO' AND (assigned_agent = ? OR assigned_agent IS NULL OR assigned_agent = '')
+      WHERE status IN ('TODO', 'BACKLOG') AND (assigned_agent = ? OR assigned_agent IS NULL OR assigned_agent = '')
       ORDER BY
+        CASE status WHEN 'TODO' THEN 0 ELSE 1 END ASC,
         CASE priority WHEN 'P0' THEN 0 WHEN 'P1' THEN 1 WHEN 'P2' THEN 2 WHEN 'P3' THEN 3 ELSE 4 END ASC,
         column_order ASC
       LIMIT 1
@@ -109,8 +111,9 @@ export function getNextPendingTask(projectId: string, role?: string): TaskRow | 
   }
   return rawDb.prepare(`
     SELECT * FROM "${p}_tasks"
-    WHERE status = 'TODO'
+    WHERE status IN ('TODO', 'BACKLOG')
     ORDER BY
+      CASE status WHEN 'TODO' THEN 0 ELSE 1 END ASC,
       CASE priority WHEN 'P0' THEN 0 WHEN 'P1' THEN 1 WHEN 'P2' THEN 2 WHEN 'P3' THEN 3 ELSE 4 END ASC,
       column_order ASC
     LIMIT 1

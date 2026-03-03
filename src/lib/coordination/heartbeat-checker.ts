@@ -1,4 +1,4 @@
-import { getProjectAgents, upsertProjectAgent, insertProjectEvent } from '@/lib/db/project-queries';
+import { getProjectAgents, upsertProjectAgent, insertProjectEvent, updateProjectTask, getProjectTasks } from '@/lib/db/project-queries';
 import { projectTablesExist } from '@/lib/db/dynamic-tables';
 import { eventBus } from '@/lib/events/event-bus';
 import { HEARTBEAT_THRESHOLDS } from '@/lib/constants';
@@ -152,6 +152,22 @@ export function checkStaleAgents(projectId: string): void {
     upsertProjectAgent(projectId, updatedAgent);
     changed = true;
 
+    // Mark the agent's current task as DONE if it was IN_PROGRESS
+    if (agent.current_task) {
+      try {
+        const tasks = getProjectTasks(projectId);
+        const agentTask = tasks.find(
+          (t) => t.external_id === agent.current_task || t.id === agent.current_task
+        );
+        if (agentTask && agentTask.status === 'IN_PROGRESS') {
+          updateProjectTask(projectId, agentTask.id, {
+            status: 'DONE',
+            updated_at: nowIso,
+          });
+        }
+      } catch { /* non-fatal */ }
+    }
+
     // Emit event only when actually marking completed (not on heartbeat refresh)
     const staleEvent: EventRow = {
       id: `evt-hb-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -197,7 +213,19 @@ export function checkStaleAgents(projectId: string): void {
     }));
     eventBus.broadcast('agent.synced', { agents: mapped }, projectId);
 
-    // Proactively trigger auto-relay when agents complete
+    // Proactively trigger sync + auto-relay when agents complete
+    // Sync first to pick up TASKS.md changes the agents wrote, then relay
+    try {
+      import('@/lib/coordination/sync-engine').then(async ({ syncProject }) => {
+        const project = require('@/lib/db').db
+          .select()
+          .from(require('@/lib/db').schema.projects)
+          .where(require('drizzle-orm').eq(require('@/lib/db').schema.projects.id, projectId))
+          .get();
+        if (project) await syncProject(project).catch(() => {});
+      }).catch(() => {});
+    } catch { /* non-fatal */ }
+
     try {
       import('@/lib/coordination/relay').then(({ runAutoRelay }) => {
         runAutoRelay(projectId).catch(() => {});
