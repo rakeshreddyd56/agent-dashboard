@@ -1,5 +1,5 @@
 import { db, schema } from '@/lib/db';
-import { eq, and, inArray } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { eventBus } from '@/lib/events/event-bus';
 import {
   parseRegistry,
@@ -11,6 +11,18 @@ import {
   parseProgressTxt,
 } from './parsers';
 import { HEARTBEAT_THRESHOLDS } from '@/lib/constants';
+import {
+  bulkUpsertProjectAgents,
+  replaceProjectLocks,
+  bulkReplaceProjectTasks,
+  insertProjectEvent,
+  bulkInsertProjectEvents,
+  insertProjectAnalytics,
+  getProjectTasks,
+  getProjectAgents,
+} from '@/lib/db/project-queries';
+import { createProjectTables, projectTablesExist } from '@/lib/db/dynamic-tables';
+import type { AgentRow, EventRow, LockRow, TaskRow } from '@/lib/db/project-queries';
 import type { Project } from '@/lib/types';
 
 // Track event log byte offsets per project
@@ -32,6 +44,11 @@ export async function syncProject(project: Project) {
   if (!projectRow) {
     console.warn(`syncProject: skipping ${projectId} — project row not found`);
     return;
+  }
+
+  // Ensure per-project tables exist
+  if (!projectTablesExist(projectId)) {
+    createProjectTables(projectId);
   }
 
   // 1. Sync agents from registry + health
@@ -58,150 +75,107 @@ export async function syncProject(project: Project) {
     }
   }
 
-  // Upsert agents in a transaction to prevent partial updates
-  // Batch-fetch existing agent IDs to avoid N+1 queries
-  const agentIds = agents.map((a) => a.id);
-  const existingAgents = agentIds.length > 0
-    ? new Set(
-        db.select({ id: schema.agentSnapshots.id })
-          .from(schema.agentSnapshots)
-          .where(inArray(schema.agentSnapshots.id, agentIds))
-          .all()
-          .map((r) => r.id)
-      )
-    : new Set<string>();
+  // Upsert agents into per-project table
+  const agentRows: AgentRow[] = agents.map((a) => ({
+    id: a.id,
+    agent_id: a.agentId,
+    role: a.role,
+    status: a.status,
+    current_task: a.currentTask || null,
+    model: a.model || null,
+    session_start: a.sessionStart || null,
+    last_heartbeat: a.lastHeartbeat || null,
+    locked_files: JSON.stringify(a.lockedFiles),
+    progress: a.progress ?? null,
+    estimated_cost: a.estimatedCost ?? null,
+    created_at: a.createdAt,
+  }));
 
-  db.transaction((tx) => {
-    for (const agent of agents) {
-      if (existingAgents.has(agent.id)) {
-        tx.update(schema.agentSnapshots)
-          .set({
-            status: agent.status,
-            currentTask: agent.currentTask,
-            lastHeartbeat: agent.lastHeartbeat,
-            lockedFiles: JSON.stringify(agent.lockedFiles),
-            progress: agent.progress,
-            estimatedCost: agent.estimatedCost,
-            createdAt: agent.createdAt,
-          })
-          .where(eq(schema.agentSnapshots.id, agent.id))
-          .run();
-      } else {
-        tx.insert(schema.agentSnapshots)
-          .values({
-            id: agent.id,
-            projectId: agent.projectId,
-            agentId: agent.agentId,
-            role: agent.role,
-            status: agent.status,
-            currentTask: agent.currentTask,
-            model: agent.model,
-            sessionStart: agent.sessionStart,
-            lastHeartbeat: agent.lastHeartbeat,
-            lockedFiles: JSON.stringify(agent.lockedFiles),
-            progress: agent.progress,
-            estimatedCost: agent.estimatedCost,
-            createdAt: agent.createdAt,
-          })
-          .run();
-      }
-    }
-  });
-
+  bulkUpsertProjectAgents(projectId, agentRows);
   eventBus.broadcast('agent.synced', { agents, staleAgentIds }, projectId);
 
   // Emit warning events for stale agents
   for (const agentId of staleAgentIds) {
+    const staleEvent: EventRow = {
+      id: `${projectId}-evt-stale-${agentId}-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      level: 'warning',
+      agent_id: agentId,
+      agent_role: null,
+      message: `Agent ${agentId} may have crashed (no heartbeat for >5 minutes)`,
+      details: null,
+    };
+    insertProjectEvent(projectId, staleEvent);
+
     eventBus.broadcast('agent.heartbeat_lost', {
       events: [{
-        id: `${projectId}-evt-stale-${agentId}-${Date.now()}`,
+        id: staleEvent.id,
         projectId,
-        timestamp: new Date().toISOString(),
-        level: 'warning',
+        timestamp: staleEvent.timestamp,
+        level: staleEvent.level,
         agentId,
-        message: `Agent ${agentId} may have crashed (no heartbeat for >5 minutes)`,
+        message: staleEvent.message,
       }],
     }, projectId);
   }
 
-  // 2. Sync file locks (in transaction to prevent partial state)
+  // 2. Sync file locks into per-project table
   const locks = parseLocks(coordinationPath, projectId);
-  db.transaction((tx) => {
-    tx.delete(schema.fileLocks).where(eq(schema.fileLocks.projectId, projectId)).run();
-    for (const lock of locks) {
-      tx.insert(schema.fileLocks).values(lock).run();
-    }
-  });
+  const lockRows: LockRow[] = locks.map((l) => ({
+    id: l.id,
+    file_path: l.filePath,
+    agent_id: l.agentId,
+    agent_role: l.agentRole,
+    locked_at: l.lockedAt,
+  }));
+  replaceProjectLocks(projectId, lockRows);
   eventBus.broadcast('lock.updated', { locks }, projectId);
 
-  // 3. Sync tasks from queue.json and TASKS.md (preserve dashboard tasks)
+  // 3. Sync tasks from queue.json and TASKS.md into per-project table
   const queueTasks = parseQueue(coordinationPath, projectId);
   const mdTasks = parseTasksMd(projectPath, projectId);
   const allTasks = [...queueTasks, ...mdTasks];
 
-  // Only delete coordination + tasks_md sourced tasks — preserve dashboard-created tasks
-  // First get IDs of tasks to delete (to clean up FK-dependent rows)
-  const tasksToDelete = db.select({ id: schema.tasks.id })
-    .from(schema.tasks)
-    .where(
-      and(
-        eq(schema.tasks.projectId, projectId),
-        inArray(schema.tasks.source, ['coordination', 'tasks_md'])
-      )
-    )
-    .all()
-    .map((r) => r.id);
+  // Convert to TaskRow format and replace coordination/tasks_md sourced tasks
+  const coordTaskRows: TaskRow[] = allTasks.map((t) => ({
+    id: t.id,
+    external_id: t.externalId || null,
+    title: t.title,
+    description: t.description || null,
+    status: t.status,
+    priority: t.priority,
+    assigned_agent: t.assignedAgent || null,
+    tags: JSON.stringify(t.tags),
+    effort: t.effort || null,
+    dependencies: JSON.stringify(t.dependencies),
+    source: t.source,
+    column_order: t.columnOrder,
+    created_at: t.createdAt,
+    updated_at: t.updatedAt,
+  }));
 
-  // Delete and re-insert coordination tasks in a transaction
-  db.transaction((tx) => {
-    if (tasksToDelete.length > 0) {
-      // Delete dependent rows first to avoid FK constraint violations
-      tx.delete(schema.taskComments)
-        .where(inArray(schema.taskComments.taskId, tasksToDelete))
-        .run();
-      tx.delete(schema.qualityReviews)
-        .where(inArray(schema.qualityReviews.taskId, tasksToDelete))
-        .run();
-      tx.delete(schema.tasks)
-        .where(inArray(schema.tasks.id, tasksToDelete))
-        .run();
-    }
-
-    for (const task of allTasks) {
-      tx.insert(schema.tasks)
-        .values({
-          id: task.id,
-          projectId: task.projectId,
-          externalId: task.externalId,
-          title: task.title,
-          description: task.description,
-          status: task.status,
-          priority: task.priority,
-          assignedAgent: task.assignedAgent,
-          tags: JSON.stringify(task.tags),
-          effort: task.effort,
-          dependencies: JSON.stringify(task.dependencies),
-          source: task.source,
-          columnOrder: task.columnOrder,
-          createdAt: task.createdAt,
-          updatedAt: task.updatedAt,
-        })
-        .run();
-    }
-  });
+  // Replace coordination-sourced tasks, then tasks_md-sourced tasks
+  bulkReplaceProjectTasks(projectId, coordTaskRows.filter((t) => t.source === 'coordination'), 'coordination');
+  bulkReplaceProjectTasks(projectId, coordTaskRows.filter((t) => t.source === 'tasks_md'), 'tasks_md');
 
   eventBus.broadcast('task.synced', { tasks: allTasks }, projectId);
 
-  // 4. Sync events (incremental)
+  // 4. Sync events (incremental) into per-project table
   const currentOffset = eventOffsets.get(projectId) || 0;
   const { events: newEvents, newOffset } = parseEventsLog(coordinationPath, projectId, currentOffset);
   eventOffsets.set(projectId, newOffset);
 
-  for (const event of newEvents) {
-    db.insert(schema.events).values(event).run();
-  }
-
   if (newEvents.length > 0) {
+    const eventRows: EventRow[] = newEvents.map((e) => ({
+      id: e.id,
+      timestamp: e.timestamp,
+      level: e.level,
+      agent_id: e.agentId || null,
+      agent_role: e.agentRole || null,
+      message: e.message,
+      details: e.details || null,
+    }));
+    bulkInsertProjectEvents(projectId, eventRows);
     eventBus.broadcast('event.created', { events: newEvents }, projectId);
   }
 
@@ -227,36 +201,39 @@ export async function syncProject(project: Project) {
       return true;
     });
 
-    for (const event of newProgressEvents) {
-      db.insert(schema.events).values(event).run();
-    }
-
     if (newProgressEvents.length > 0) {
+      const progressRows: EventRow[] = newProgressEvents.map((e) => ({
+        id: e.id,
+        timestamp: e.timestamp,
+        level: e.level,
+        agent_id: e.agentId || null,
+        agent_role: e.agentRole || null,
+        message: e.message,
+        details: e.details || null,
+      }));
+      bulkInsertProjectEvents(projectId, progressRows);
       eventBus.broadcast('event.created', { events: newProgressEvents }, projectId);
     }
   }
 
-  // 5. Update analytics snapshot
-  const taskRows = db.select().from(schema.tasks).where(eq(schema.tasks.projectId, projectId)).all();
-  const agentRows = db.select().from(schema.agentSnapshots).where(eq(schema.agentSnapshots.projectId, projectId)).all();
+  // 5. Update analytics snapshot in per-project table
+  const taskRows = getProjectTasks(projectId);
+  const currentAgentRows = getProjectAgents(projectId);
 
-  const activeAgents = agentRows.filter((a) => ['working', 'planning', 'reviewing'].includes(a.status)).length;
+  const activeAgents = currentAgentRows.filter((a) => ['working', 'planning', 'reviewing'].includes(a.status)).length;
   const inProgress = taskRows.filter((t) => t.status === 'IN_PROGRESS').length;
   const completed = taskRows.filter((t) => t.status === 'DONE').length;
   const total = taskRows.length;
 
-  db.insert(schema.analyticsSnapshots)
-    .values({
-      id: `${projectId}-snap-${Date.now()}`,
-      projectId,
-      timestamp: new Date().toISOString(),
-      activeAgents,
-      tasksInProgress: inProgress,
-      tasksCompleted: completed,
-      totalTasks: total,
-      estimatedCost: agentRows.reduce((sum, a) => sum + (a.estimatedCost || 0), 0),
-    })
-    .run();
+  insertProjectAnalytics(projectId, {
+    id: `${projectId}-snap-${Date.now()}`,
+    timestamp: new Date().toISOString(),
+    active_agents: activeAgents,
+    tasks_in_progress: inProgress,
+    tasks_completed: completed,
+    total_tasks: total,
+    estimated_cost: currentAgentRows.reduce((sum, a) => sum + (a.estimated_cost || 0), 0),
+  });
 
   eventBus.broadcast('sync.complete', { projectId }, projectId);
 }

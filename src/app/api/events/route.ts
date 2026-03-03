@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { sseEmitter } from '@/lib/sse/emitter';
-import { db, schema } from '@/lib/db';
-import { eq, desc } from 'drizzle-orm';
+import { getProjectEvents } from '@/lib/db/project-queries';
+import { projectTablesExist, createProjectTables } from '@/lib/db/dynamic-tables';
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -14,13 +14,19 @@ export async function GET(req: NextRequest) {
   // If ?mode=json explicitly, return JSON. Otherwise default to SSE stream.
   const mode = searchParams.get('mode');
   if (mode === 'json') {
-    const events = db
-      .select()
-      .from(schema.events)
-      .where(eq(schema.events.projectId, projectId))
-      .orderBy(desc(schema.events.timestamp))
-      .limit(100)
-      .all();
+    if (!projectTablesExist(projectId)) {
+      createProjectTables(projectId);
+    }
+    const events = getProjectEvents(projectId, { limit: 100 }).map((e) => ({
+      id: e.id,
+      projectId,
+      timestamp: e.timestamp,
+      level: e.level,
+      agentId: e.agent_id,
+      agentRole: e.agent_role,
+      message: e.message,
+      details: e.details,
+    }));
     return Response.json({ events });
   }
 

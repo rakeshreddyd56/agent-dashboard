@@ -6,9 +6,14 @@ import fs from 'fs';
 
 const DB_PATH = process.env.DB_PATH || './data/dashboard.db';
 
-function getDb() {
-  const key = '__agent_dashboard_db__';
-  const g = globalThis as unknown as Record<string, ReturnType<typeof createDb>>;
+interface DbInstance {
+  drizzle: ReturnType<typeof drizzle>;
+  raw: InstanceType<typeof Database>;
+}
+
+function getDbInstance(): DbInstance {
+  const key = '__agent_dashboard_db_instance__';
+  const g = globalThis as unknown as Record<string, DbInstance>;
   if (!g[key]) {
     g[key] = createDb();
   }
@@ -33,6 +38,7 @@ function createDb() {
       name TEXT NOT NULL,
       path TEXT NOT NULL,
       coordination_path TEXT NOT NULL,
+      git_url TEXT,
       is_active INTEGER NOT NULL DEFAULT 0,
       is_demo INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
@@ -266,6 +272,12 @@ function createDb() {
     WHERE timestamp < datetime('now', '-7 days');
   `);
 
+  // Add git_url column if not exists (migration for existing DBs)
+  const cols = sqlite.pragma('table_info(projects)') as { name: string }[];
+  if (!cols.some((c) => c.name === 'git_url')) {
+    sqlite.exec('ALTER TABLE projects ADD COLUMN git_url TEXT');
+  }
+
   const drizzleDb = drizzle(sqlite, { schema });
 
   // Initialize background services (lazy to avoid circular deps during build)
@@ -278,8 +290,10 @@ function createDb() {
     }, 1000);
   }
 
-  return drizzleDb;
+  return { drizzle: drizzleDb, raw: sqlite };
 }
 
-export const db = getDb();
+const __dbInstance = getDbInstance();
+export const db = __dbInstance.drizzle;
+export const rawDb = __dbInstance.raw;
 export { schema };

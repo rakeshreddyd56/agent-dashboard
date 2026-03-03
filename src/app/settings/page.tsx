@@ -46,6 +46,9 @@ export default function SettingsPage() {
   const { projects, setProjects } = useProjectStore();
   const [newName, setNewName] = useState('');
   const [newPath, setNewPath] = useState('');
+  const [newGitUrl, setNewGitUrl] = useState('');
+  const [addingProject, setAddingProject] = useState(false);
+  const [addResult, setAddResult] = useState<{ success: boolean; message: string } | null>(null);
   // Pixel-agents state
   const [pixelStatus, setPixelStatus] = useState<{
     extension: { installed: boolean; location: string | null; version: string | null };
@@ -137,18 +140,37 @@ export default function SettingsPage() {
   };
 
   const handleAddProject = async () => {
-    if (!newName || !newPath) return;
-    const res = await fetch('/api/projects', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: newName, path: newPath }),
-    });
-    if (res.ok) {
-      setNewName('');
-      setNewPath('');
-      setPathMarkers(null);
-      const data = await fetch('/api/projects').then((r) => r.json());
-      if (data.projects) setProjects(data.projects);
+    if (!newName || !newPath || addingProject) return;
+    setAddingProject(true);
+    setAddResult(null);
+    try {
+      const res = await fetch('/api/projects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newName, path: newPath, gitUrl: newGitUrl || undefined }),
+      });
+      const result = await res.json();
+      if (res.ok) {
+        const parts: string[] = ['Project added'];
+        if (result.tablesCreated) parts.push('DB tables created');
+        if (result.gitCreated) parts.push(`Git repo created: ${result.gitUrl}`);
+        else if (result.gitUrl) parts.push(`Git: ${result.gitUrl}`);
+        if (result.gitError) parts.push(`Git warning: ${result.gitError}`);
+        setAddResult({ success: true, message: parts.join(' | ') });
+        setNewName('');
+        setNewPath('');
+        setNewGitUrl('');
+        setPathMarkers(null);
+        const data = await fetch('/api/projects').then((r) => r.json());
+        if (data.projects) setProjects(data.projects);
+      } else {
+        setAddResult({ success: false, message: result.error || 'Failed to add project' });
+      }
+    } catch {
+      setAddResult({ success: false, message: 'Network error' });
+    } finally {
+      setAddingProject(false);
+      setTimeout(() => setAddResult(null), 8000);
     }
   };
 
@@ -195,6 +217,9 @@ export default function SettingsPage() {
                       {p.isDemo && <Badge variant="outline" className="text-[10px]">Demo</Badge>}
                     </div>
                     <p className="font-mono text-[10px] text-muted-foreground">{p.path}</p>
+                    {p.gitUrl && (
+                      <p className="font-mono text-[10px] text-[#5ba3c9]">{p.gitUrl}</p>
+                    )}
                   </div>
                   <Button
                     variant="ghost"
@@ -326,10 +351,34 @@ export default function SettingsPage() {
                 </div>
               )}
 
-              <Button onClick={handleAddProject} disabled={!newName || !newPath} size="sm">
-                <Plus className="mr-1.5 h-3.5 w-3.5" />
-                Add Project
+              <div>
+                <label className="text-xs text-muted-foreground">Git Repository URL (optional)</label>
+                <Input
+                  value={newGitUrl}
+                  onChange={(e) => setNewGitUrl(e.target.value)}
+                  placeholder="https://github.com/user/repo.git"
+                />
+                <p className="mt-1 text-[10px] text-muted-foreground">
+                  Leave empty to auto-create a private repo under rakeshreddyd56
+                </p>
+              </div>
+
+              <Button onClick={handleAddProject} disabled={!newName || !newPath || addingProject} size="sm">
+                {addingProject ? (
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Plus className="mr-1.5 h-3.5 w-3.5" />
+                )}
+                {addingProject ? 'Setting up...' : 'Add Project'}
               </Button>
+
+              {addResult && (
+                <div className={`rounded-lg p-2 text-xs ${
+                  addResult.success ? 'bg-[#0d7a4a]/10 text-[#3dba8a]' : 'bg-[#a4312f]/10 text-[#e05252]'
+                }`}>
+                  {addResult.message}
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>

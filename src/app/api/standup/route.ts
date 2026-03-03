@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db, schema } from '@/lib/db';
-import { eq, and, desc, gte } from 'drizzle-orm';
+import { eq, and, desc } from 'drizzle-orm';
 import { eventBus } from '@/lib/events/event-bus';
+import { getProjectTasks, getProjectAgents, getProjectEvents } from '@/lib/db/project-queries';
+import { projectTablesExist, createProjectTables } from '@/lib/db/dynamic-tables';
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -44,6 +46,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'projectId required' }, { status: 400 });
     }
 
+    if (!projectTablesExist(projectId as string)) {
+      createProjectTables(projectId as string);
+    }
+
   const date = requestDate || new Date().toISOString().slice(0, 10);
 
   // Check if already generated
@@ -59,19 +65,14 @@ export async function POST(req: NextRequest) {
   const dayStart = `${date}T00:00:00.000Z`;
 
   // All tasks
-  const allTasks = db.select().from(schema.tasks)
-    .where(eq(schema.tasks.projectId, projectId))
-    .all();
+  const allTasks = getProjectTasks(projectId as string);
 
   // Recent events (today)
-  const todayEvents = db.select().from(schema.events)
-    .where(and(eq(schema.events.projectId, projectId), gte(schema.events.timestamp, dayStart)))
-    .all();
+  const todayEvents = getProjectEvents(projectId as string, { limit: 1000 })
+    .filter(e => e.timestamp >= dayStart);
 
   // Agents
-  const agents = db.select().from(schema.agentSnapshots)
-    .where(eq(schema.agentSnapshots.projectId, projectId))
-    .all();
+  const agents = getProjectAgents(projectId as string);
 
   // Build per-agent report
   const agentReports: Record<string, {
@@ -81,8 +82,8 @@ export async function POST(req: NextRequest) {
   }> = {};
 
   for (const agent of agents) {
-    agentReports[agent.agentId] = {
-      agentId: agent.agentId,
+    agentReports[agent.agent_id] = {
+      agentId: agent.agent_id,
       role: agent.role,
       status: agent.status,
       completed: [],
@@ -94,7 +95,7 @@ export async function POST(req: NextRequest) {
 
   // Categorize tasks by assigned agent
   for (const task of allTasks) {
-    const agent = task.assignedAgent;
+    const agent = task.assigned_agent;
     if (!agent) continue;
     if (!agentReports[agent]) {
       agentReports[agent] = {
@@ -102,7 +103,7 @@ export async function POST(req: NextRequest) {
         completed: [], inProgress: [], blocked: [], eventCount: 0,
       };
     }
-    if (task.status === 'DONE' && task.updatedAt >= dayStart) {
+    if (task.status === 'DONE' && task.updated_at >= dayStart) {
       agentReports[agent].completed.push(task.title);
     } else if (['IN_PROGRESS', 'REVIEW', 'QUALITY_REVIEW', 'TESTING'].includes(task.status)) {
       agentReports[agent].inProgress.push(task.title);
@@ -113,8 +114,8 @@ export async function POST(req: NextRequest) {
 
   // Count events per agent
   for (const evt of todayEvents) {
-    if (evt.agentId && agentReports[evt.agentId]) {
-      agentReports[evt.agentId].eventCount++;
+    if (evt.agent_id && agentReports[evt.agent_id]) {
+      agentReports[evt.agent_id].eventCount++;
     }
   }
 

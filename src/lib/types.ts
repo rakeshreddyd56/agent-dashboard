@@ -17,6 +17,7 @@ export interface Project {
   name: string;
   path: string;
   coordinationPath: string;
+  gitUrl?: string | null;
   isActive: boolean;
   isDemo: boolean;
   createdAt: string;

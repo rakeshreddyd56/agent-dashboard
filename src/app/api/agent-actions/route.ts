@@ -2,6 +2,20 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db, schema } from '@/lib/db';
 import { eq, and, desc, or, isNull } from 'drizzle-orm';
 import { eventBus } from '@/lib/events/event-bus';
+import { projectTablesExist, createProjectTables } from '@/lib/db/dynamic-tables';
+import {
+  getProjectAgents,
+  upsertProjectAgent,
+  getProjectTasks,
+  getProjectTask,
+  getProjectTasksByStatus,
+  upsertProjectTask,
+  updateProjectTask,
+  getProjectTaskComments,
+  insertProjectTaskComment,
+  insertProjectEvent,
+} from '@/lib/db/project-queries';
+import type { AgentRow, TaskRow, EventRow, CommentRow } from '@/lib/db/project-queries';
 
 /**
  * Agent Actions API — Restricted scope
@@ -36,6 +50,13 @@ const VALID_PRIORITIES = new Set(['P0', 'P1', 'P2', 'P3']);
 
 const COMMENT_TYPES = new Set(['comment', 'bug', 'status-change', 'resolution', 'blocker', 'note']);
 
+/** Ensure per-project tables exist, creating them if needed. */
+function ensureProjectTables(projectId: string): void {
+  if (!projectTablesExist(projectId)) {
+    createProjectTables(projectId);
+  }
+}
+
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const action = searchParams.get('action');
@@ -53,32 +74,30 @@ export async function GET(req: NextRequest) {
     }, { status: 403 });
   }
 
+  ensureProjectTables(projectId);
+
   switch (action) {
     case 'list-tasks': {
       const status = searchParams.get('status');
-      let tasks;
+      let tasks: TaskRow[];
       if (status) {
-        tasks = db.select().from(schema.tasks)
-          .where(and(eq(schema.tasks.projectId, projectId), eq(schema.tasks.status, status)))
-          .all();
+        tasks = getProjectTasksByStatus(projectId, status);
       } else {
-        tasks = db.select().from(schema.tasks)
-          .where(eq(schema.tasks.projectId, projectId))
-          .all();
+        tasks = getProjectTasks(projectId);
       }
 
       return NextResponse.json({
         tasks: tasks.map((t) => ({
           id: t.id,
-          externalId: t.externalId,
+          externalId: t.external_id,
           title: t.title,
           description: t.description,
           status: t.status,
           priority: t.priority,
-          assignedAgent: t.assignedAgent,
+          assignedAgent: t.assigned_agent,
           source: t.source,
-          createdAt: t.createdAt,
-          updatedAt: t.updatedAt,
+          createdAt: t.created_at,
+          updatedAt: t.updated_at,
         })),
         count: tasks.length,
       });
@@ -90,18 +109,13 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ error: 'taskId required' }, { status: 400 });
       }
 
-      const task = db.select().from(schema.tasks)
-        .where(and(eq(schema.tasks.id, taskId), eq(schema.tasks.projectId, projectId)))
-        .get();
+      const task = getProjectTask(projectId, taskId);
 
       if (!task) {
         return NextResponse.json({ error: 'Task not found' }, { status: 404 });
       }
 
-      const comments = db.select().from(schema.taskComments)
-        .where(eq(schema.taskComments.taskId, taskId))
-        .orderBy(desc(schema.taskComments.createdAt))
-        .all();
+      const comments = getProjectTaskComments(projectId, taskId);
 
       return NextResponse.json({ task, comments });
     }
@@ -112,35 +126,28 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ error: 'taskId required' }, { status: 400 });
       }
 
-      const comments = db.select().from(schema.taskComments)
-        .where(eq(schema.taskComments.taskId, taskId))
-        .orderBy(desc(schema.taskComments.createdAt))
-        .all();
+      const comments = getProjectTaskComments(projectId, taskId);
 
       return NextResponse.json({ comments, count: comments.length });
     }
 
     case 'list-agents': {
-      const agents = db.select().from(schema.agentSnapshots)
-        .where(eq(schema.agentSnapshots.projectId, projectId))
-        .all();
+      const agents = getProjectAgents(projectId);
 
       return NextResponse.json({
         agents: agents.map((a) => ({
           id: a.id,
-          agentId: a.agentId,
+          agentId: a.agent_id,
           role: a.role,
           status: a.status,
-          currentTask: a.currentTask,
-          lastHeartbeat: a.lastHeartbeat,
+          currentTask: a.current_task,
+          lastHeartbeat: a.last_heartbeat,
         })),
       });
     }
 
     case 'board-summary': {
-      const tasks = db.select().from(schema.tasks)
-        .where(eq(schema.tasks.projectId, projectId))
-        .all();
+      const tasks = getProjectTasks(projectId);
 
       const byStatus: Record<string, number> = {};
       for (const t of tasks) {
@@ -284,6 +291,8 @@ export async function POST(req: NextRequest) {
     }, { status: 403 });
   }
 
+  ensureProjectTables(projectId);
+
   switch (action) {
     case 'move-task': {
       const { taskId, status, agentId } = body;
@@ -294,35 +303,32 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: `Invalid status. Valid: ${Array.from(VALID_STATUSES).join(', ')}` }, { status: 400 });
       }
 
-      const task = db.select().from(schema.tasks)
-        .where(and(eq(schema.tasks.id, taskId), eq(schema.tasks.projectId, projectId)))
-        .get();
+      const task = getProjectTask(projectId, taskId);
 
       if (!task) {
         return NextResponse.json({ error: 'Task not found' }, { status: 404 });
       }
 
       const now = new Date().toISOString();
-      const updates: Record<string, string> = { status, updatedAt: now };
-      if (agentId) updates.assignedAgent = agentId;
+      const updates: Partial<TaskRow> = { status, updated_at: now };
+      if (agentId) updates.assigned_agent = agentId;
 
-      db.update(schema.tasks).set(updates).where(eq(schema.tasks.id, taskId)).run();
+      updateProjectTask(projectId, taskId, updates);
 
       // Auto-add status change comment
       if (agentId) {
         const commentId = `comment-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-        db.insert(schema.taskComments).values({
+        insertProjectTaskComment(projectId, {
           id: commentId,
-          taskId,
-          projectId,
-          agentId,
+          task_id: taskId,
+          agent_id: agentId,
           content: `Moved task from ${task.status} to ${status}`,
           type: 'status-change',
-          createdAt: now,
-        }).run();
+          created_at: now,
+        });
       }
 
-      eventBus.broadcast('task.status_changed', { id: taskId, title: task.title, previousStatus: task.status, ...updates }, projectId);
+      eventBus.broadcast('task.status_changed', { id: taskId, title: task.title, previousStatus: task.status, status, assignedAgent: agentId, updatedAt: now }, projectId);
 
       // Log event
       logAgentEvent(projectId, agentId, 'info', `Moved task "${task.title}" to ${status}`);
@@ -342,36 +348,34 @@ export async function POST(req: NextRequest) {
       const taskId = `${projectId}-agent-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       const now = new Date().toISOString();
 
-      db.insert(schema.tasks).values({
+      upsertProjectTask(projectId, {
         id: taskId,
-        projectId,
-        externalId: externalId || null,
+        external_id: externalId || null,
         title,
         description: description || null,
         status: taskStatus,
         priority: taskPriority,
-        assignedAgent: agentId || null,
+        assigned_agent: agentId || null,
         tags: '[]',
         effort: null,
         dependencies: '[]',
         source: 'coordination',
-        columnOrder: 0,
-        createdAt: now,
-        updatedAt: now,
-      }).run();
+        column_order: 0,
+        created_at: now,
+        updated_at: now,
+      });
 
       // Auto-comment on creation
       if (agentId) {
         const commentId = `comment-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-        db.insert(schema.taskComments).values({
+        insertProjectTaskComment(projectId, {
           id: commentId,
-          taskId,
-          projectId,
-          agentId,
+          task_id: taskId,
+          agent_id: agentId,
           content: `Created task: ${title}${description ? '\n' + description : ''}`,
           type: 'comment',
-          createdAt: now,
-        }).run();
+          created_at: now,
+        });
       }
 
       eventBus.broadcast('task.created', {
@@ -398,48 +402,45 @@ export async function POST(req: NextRequest) {
       const taskId = `${projectId}-bug-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       const now = new Date().toISOString();
 
-      db.insert(schema.tasks).values({
+      upsertProjectTask(projectId, {
         id: taskId,
-        projectId,
-        externalId: null,
+        external_id: null,
         title: bugTitle,
         description: description || null,
         status: 'BACKLOG',
         priority: bugPriority,
-        assignedAgent: null,
+        assigned_agent: null,
         tags: JSON.stringify(['bug', `reported-by:${agentId}`]),
         effort: null,
         dependencies: relatedTaskId ? JSON.stringify([relatedTaskId]) : '[]',
         source: 'coordination',
-        columnOrder: 0,
-        createdAt: now,
-        updatedAt: now,
-      }).run();
+        column_order: 0,
+        created_at: now,
+        updated_at: now,
+      });
 
       // Comment on the bug
       const commentId = `comment-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-      db.insert(schema.taskComments).values({
+      insertProjectTaskComment(projectId, {
         id: commentId,
-        taskId,
-        projectId,
-        agentId,
+        task_id: taskId,
+        agent_id: agentId,
         content: `Bug reported: ${title}${description ? '\nDetails: ' + description : ''}${relatedTaskId ? '\nRelated to: ' + relatedTaskId : ''}`,
         type: 'bug',
-        createdAt: now,
-      }).run();
+        created_at: now,
+      });
 
       // If related to an existing task, add comment there too
       if (relatedTaskId) {
         const relCommentId = `comment-${Date.now()}-${Math.random().toString(36).slice(2, 6)}b`;
-        db.insert(schema.taskComments).values({
+        insertProjectTaskComment(projectId, {
           id: relCommentId,
-          taskId: relatedTaskId,
-          projectId,
-          agentId,
+          task_id: relatedTaskId,
+          agent_id: agentId,
           content: `Bug filed: ${bugTitle} (${taskId})`,
           type: 'bug',
-          createdAt: now,
-        }).run();
+          created_at: now,
+        });
       }
 
       eventBus.broadcast('task.created', {
@@ -458,9 +459,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: 'taskId, agentId, and content required' }, { status: 400 });
       }
 
-      const task = db.select().from(schema.tasks)
-        .where(and(eq(schema.tasks.id, taskId), eq(schema.tasks.projectId, projectId)))
-        .get();
+      const task = getProjectTask(projectId, taskId);
 
       if (!task) {
         return NextResponse.json({ error: 'Task not found' }, { status: 404 });
@@ -470,18 +469,17 @@ export async function POST(req: NextRequest) {
       const commentId = `comment-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
       const now = new Date().toISOString();
 
-      db.insert(schema.taskComments).values({
+      insertProjectTaskComment(projectId, {
         id: commentId,
-        taskId,
-        projectId,
-        agentId,
+        task_id: taskId,
+        agent_id: agentId,
         content,
         type: commentType,
-        createdAt: now,
-      }).run();
+        created_at: now,
+      });
 
-      // Update task's updatedAt
-      db.update(schema.tasks).set({ updatedAt: now }).where(eq(schema.tasks.id, taskId)).run();
+      // Update task's updated_at
+      updateProjectTask(projectId, taskId, { updated_at: now });
 
       eventBus.broadcast('task.updated', { id: taskId, updatedAt: now, lastComment: { agentId, content, type: commentType } }, projectId);
 
@@ -494,9 +492,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: 'taskId and agentId required' }, { status: 400 });
       }
 
-      const task = db.select().from(schema.tasks)
-        .where(and(eq(schema.tasks.id, taskId), eq(schema.tasks.projectId, projectId)))
-        .get();
+      const task = getProjectTask(projectId, taskId);
 
       if (!task) {
         return NextResponse.json({ error: 'Task not found' }, { status: 404 });
@@ -514,27 +510,26 @@ export async function POST(req: NextRequest) {
 
       const finalStatus = approvedReview ? 'DONE' : 'QUALITY_REVIEW';
 
-      db.update(schema.tasks).set({
+      updateProjectTask(projectId, taskId, {
         status: finalStatus,
-        updatedAt: now,
-      }).where(eq(schema.tasks.id, taskId)).run();
+        updated_at: now,
+      });
 
       // Add resolution comment
       const commentId = `comment-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-      db.insert(schema.taskComments).values({
+      insertProjectTaskComment(projectId, {
         id: commentId,
-        taskId,
-        projectId,
-        agentId,
+        task_id: taskId,
+        agent_id: agentId,
         content: finalStatus === 'DONE'
           ? (resolution || `Task closed by ${agentId}`)
           : `Task sent to quality review (close requested by ${agentId})`,
         type: finalStatus === 'DONE' ? 'resolution' : 'status-change',
-        createdAt: now,
-      }).run();
+        created_at: now,
+      });
 
       if (finalStatus === 'QUALITY_REVIEW') {
-        // Create a pending review
+        // Create a pending review (stays in shared qualityReviews table)
         const reviewId = `review-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         db.insert(schema.qualityReviews).values({
           id: reviewId,
@@ -564,34 +559,34 @@ export async function POST(req: NextRequest) {
 
       // Agents can only update their own status — validated by requiring agentId matches
       const id = `${projectId}-${agentId}`;
-      const existing = db.select().from(schema.agentSnapshots)
-        .where(eq(schema.agentSnapshots.id, id))
-        .get();
+      const agents = getProjectAgents(projectId);
+      const existing = agents.find((a) => a.id === id);
 
       const now = new Date().toISOString();
 
       if (existing) {
-        const updates: Record<string, unknown> = { lastHeartbeat: now };
-        if (status) updates.status = status;
-        if (currentTask !== undefined) updates.currentTask = currentTask;
-
-        db.update(schema.agentSnapshots).set(updates).where(eq(schema.agentSnapshots.id, id)).run();
+        const updatedAgent: AgentRow = {
+          ...existing,
+          last_heartbeat: now,
+          status: status || existing.status,
+          current_task: currentTask !== undefined ? currentTask : existing.current_task,
+        };
+        upsertProjectAgent(projectId, updatedAgent);
       } else {
-        db.insert(schema.agentSnapshots).values({
+        upsertProjectAgent(projectId, {
           id,
-          projectId,
-          agentId,
+          agent_id: agentId,
           role: role || 'coder',
           status: status || 'working',
-          currentTask: currentTask || null,
+          current_task: currentTask || null,
           model: null,
-          sessionStart: now,
-          lastHeartbeat: now,
-          lockedFiles: '[]',
+          session_start: now,
+          last_heartbeat: now,
+          locked_files: '[]',
           progress: 0,
-          estimatedCost: 0,
-          createdAt: now,
-        }).run();
+          estimated_cost: 0,
+          created_at: now,
+        });
       }
 
       eventBus.broadcast('agent.updated', { agentId, status, currentTask }, projectId);
@@ -612,7 +607,7 @@ export async function POST(req: NextRequest) {
         ? `dm:${[fromAgent, toAgent].sort().join(':')}`
         : `broadcast:${projectId}`;
 
-      // Upsert conversation
+      // Upsert conversation (shared table)
       const existingConv = db.select().from(schema.conversations)
         .where(eq(schema.conversations.id, conversationId))
         .get();
@@ -666,9 +661,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: `Invalid status. Valid: ${Array.from(validReviewStatuses).join(', ')}` }, { status: 400 });
       }
 
-      const task = db.select().from(schema.tasks)
-        .where(and(eq(schema.tasks.id, taskId), eq(schema.tasks.projectId, projectId)))
-        .get();
+      const task = getProjectTask(projectId, taskId);
 
       if (!task) {
         return NextResponse.json({ error: 'Task not found' }, { status: 404 });
@@ -677,6 +670,7 @@ export async function POST(req: NextRequest) {
       const now = new Date().toISOString();
       const reviewId = `review-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
+      // Quality reviews stay in shared table
       db.insert(schema.qualityReviews).values({
         id: reviewId,
         projectId,
@@ -693,14 +687,14 @@ export async function POST(req: NextRequest) {
 
       // If approved and task is in QUALITY_REVIEW, auto-advance to DONE
       if (reviewStatus === 'approved' && task.status === 'QUALITY_REVIEW') {
-        db.update(schema.tasks).set({ status: 'DONE', updatedAt: now }).where(eq(schema.tasks.id, taskId)).run();
+        updateProjectTask(projectId, taskId, { status: 'DONE', updated_at: now });
         eventBus.broadcast('task.status_changed', {
           id: taskId, title: task.title, status: 'DONE', previousStatus: 'QUALITY_REVIEW', updatedAt: now,
         }, projectId);
         logAgentEvent(projectId, reviewer, 'success', `Approved and closed task: ${task.title}`);
       } else if (reviewStatus === 'rejected' || reviewStatus === 'needs_changes') {
         // Send back to IN_PROGRESS
-        db.update(schema.tasks).set({ status: 'IN_PROGRESS', updatedAt: now }).where(eq(schema.tasks.id, taskId)).run();
+        updateProjectTask(projectId, taskId, { status: 'IN_PROGRESS', updated_at: now });
         eventBus.broadcast('task.status_changed', {
           id: taskId, title: task.title, status: 'IN_PROGRESS', previousStatus: 'QUALITY_REVIEW', updatedAt: now,
         }, projectId);
@@ -718,24 +712,25 @@ export async function POST(req: NextRequest) {
   }
 }
 
-/** Log an agent event to the events table */
+/** Log an agent event to the per-project events table */
 function logAgentEvent(projectId: string, agentId: string | undefined, level: string, message: string) {
   try {
     const eventId = `evt-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    db.insert(schema.events).values({
+    const now = new Date().toISOString();
+
+    insertProjectEvent(projectId, {
       id: eventId,
-      projectId,
-      timestamp: new Date().toISOString(),
+      timestamp: now,
       level,
-      agentId: agentId || null,
-      agentRole: null,
+      agent_id: agentId || null,
+      agent_role: null,
       message,
       details: null,
-    }).run();
+    });
 
     eventBus.broadcast('event.created', {
       id: eventId, projectId, level, agentId, message,
-      timestamp: new Date().toISOString(),
+      timestamp: now,
     }, projectId);
   } catch { /* non-critical */ }
 }

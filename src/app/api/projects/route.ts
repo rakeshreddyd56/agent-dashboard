@@ -4,6 +4,10 @@ import { eq } from 'drizzle-orm';
 import { discoverProjects } from '@/lib/coordination/discover';
 import { fileWatcher } from '@/lib/coordination/file-watcher';
 import { cleanupProject } from '@/lib/coordination/sync-engine';
+import { seedCoordination } from '@/lib/coordination/seed-coordination';
+import { setupGitRepo } from '@/lib/git/setup';
+import { createProjectTables, dropProjectTables, projectTablesExist } from '@/lib/db/dynamic-tables';
+import fs from 'fs';
 
 // One-time initialization flag
 let discoveryDone = false;
@@ -20,7 +24,6 @@ export async function GET() {
   // Start watchers for projects with existing coordination dirs
   for (const p of projects) {
     if (!p.isDemo && !fileWatcher.isWatching(p.id)) {
-      const fs = await import('fs');
       if (fs.existsSync(p.coordinationPath)) {
         fileWatcher.startWatching({
           id: p.id,
@@ -42,6 +45,7 @@ export async function GET() {
       name: p.name,
       path: p.path,
       coordinationPath: p.coordinationPath,
+      gitUrl: p.gitUrl,
       isActive: p.isActive,
       isDemo: p.isDemo,
       createdAt: p.createdAt,
@@ -58,15 +62,19 @@ export async function POST(req: NextRequest) {
     } catch {
       return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
     }
-    const { name, path: projectPath, coordinationPath } = body as Record<string, string | undefined>;
+    const { name, path: projectPath, gitUrl: providedGitUrl } = body as Record<string, string | undefined>;
 
     if (!name || !projectPath) {
       return NextResponse.json({ error: 'name and path are required' }, { status: 400 });
     }
 
+    // Validate path exists
+    if (!fs.existsSync(projectPath)) {
+      return NextResponse.json({ error: 'Project path does not exist on disk' }, { status: 400 });
+    }
+
     const id = name.toLowerCase().replace(/[^a-z0-9]/g, '-');
     const now = new Date().toISOString();
-    const coordPath = coordinationPath || `${projectPath}/.claude/coordination`;
 
     // Check for duplicate
     const existing = db.select().from(schema.projects).where(eq(schema.projects.id, id)).get();
@@ -74,7 +82,40 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Project with this ID already exists' }, { status: 409 });
     }
 
+    // 1. Seed coordination directory
+    const coordPath = seedCoordination(projectPath);
+
+    // 2. Git setup (auto-create private repo if no URL provided)
+    let gitUrl: string | null = null;
+    let gitCreated = false;
+    let gitError: string | undefined;
+    try {
+      const gitResult = setupGitRepo(projectPath, providedGitUrl || undefined);
+      gitUrl = gitResult.gitUrl;
+      gitCreated = gitResult.created;
+      gitError = gitResult.error;
+    } catch (err) {
+      gitError = err instanceof Error ? err.message : String(err);
+    }
+
+    // 3. Insert project record
     db.insert(schema.projects).values({
+      id,
+      name,
+      path: projectPath,
+      coordinationPath: coordPath,
+      gitUrl: gitUrl || null,
+      isActive: false,
+      isDemo: false,
+      createdAt: now,
+      updatedAt: now,
+    }).run();
+
+    // 4. Create per-project tables
+    createProjectTables(id);
+
+    // 5. Start file watcher
+    fileWatcher.startWatching({
       id,
       name,
       path: projectPath,
@@ -83,9 +124,18 @@ export async function POST(req: NextRequest) {
       isDemo: false,
       createdAt: now,
       updatedAt: now,
-    }).run();
+    });
 
-    return NextResponse.json({ id, name, path: projectPath, coordinationPath: coordPath }, { status: 201 });
+    return NextResponse.json({
+      id,
+      name,
+      path: projectPath,
+      coordinationPath: coordPath,
+      gitUrl,
+      gitCreated,
+      gitError,
+      tablesCreated: true,
+    }, { status: 201 });
   } catch (err) {
     console.error('POST /api/projects error:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
@@ -101,7 +151,12 @@ export async function DELETE(req: NextRequest) {
     fileWatcher.stopWatching(id);
     cleanupProject(id);
 
-    // Delete related data
+    // Drop per-project tables
+    if (projectTablesExist(id)) {
+      dropProjectTables(id);
+    }
+
+    // Delete related data from shared tables (for any remaining legacy data)
     db.delete(schema.tasks).where(eq(schema.tasks.projectId, id)).run();
     db.delete(schema.agentSnapshots).where(eq(schema.agentSnapshots.projectId, id)).run();
     db.delete(schema.events).where(eq(schema.events.projectId, id)).run();

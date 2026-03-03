@@ -5,6 +5,7 @@ export const projects = sqliteTable('projects', {
   name: text('name').notNull(),
   path: text('path').notNull(),
   coordinationPath: text('coordination_path').notNull(),
+  gitUrl: text('git_url'),
   isActive: integer('is_active', { mode: 'boolean' }).notNull().default(false),
   isDemo: integer('is_demo', { mode: 'boolean' }).notNull().default(false),
   createdAt: text('created_at').notNull(),

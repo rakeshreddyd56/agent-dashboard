@@ -3,6 +3,8 @@ import path from 'path';
 import { db, schema } from '@/lib/db';
 import { eq } from 'drizzle-orm';
 import { seedDemoData } from './seed-demo';
+import { seedCoordination } from './seed-coordination';
+import { createProjectTables, projectTablesExist, migrateProjectData } from '@/lib/db/dynamic-tables';
 
 export function discoverProjects() {
   const defaultPaths = (process.env.DEFAULT_PROJECTS || '').split(',').filter(Boolean);
@@ -11,31 +13,22 @@ export function discoverProjects() {
     const trimmed = projectPath.trim();
     if (!fs.existsSync(trimmed)) continue;
 
-    // Try both coordination path patterns
-    let coordinationPath = '';
-    const candidates = [
-      path.join(trimmed, '.claude', 'coordination'),
-      path.join(trimmed, 'coordination'),
-    ];
-
-    for (const c of candidates) {
-      if (fs.existsSync(c)) {
-        coordinationPath = c;
-        break;
-      }
-    }
-
-    // Even if coordination path doesn't exist yet, register the project
-    if (!coordinationPath) {
-      coordinationPath = path.join(trimmed, '.claude', 'coordination');
-    }
-
     const name = path.basename(trimmed);
     const id = name.toLowerCase().replace(/[^a-z0-9]/g, '-');
 
     // Check if already registered
     const existing = db.select().from(schema.projects).where(eq(schema.projects.id, id)).get();
-    if (existing) continue;
+    if (existing) {
+      // Ensure per-project tables exist and migrate if needed
+      if (!projectTablesExist(id)) {
+        createProjectTables(id);
+        migrateProjectData(id);
+      }
+      continue;
+    }
+
+    // Seed coordination directory if missing
+    const coordinationPath = seedCoordination(trimmed);
 
     const now = new Date().toISOString();
     db.insert(schema.projects).values({
@@ -48,6 +41,9 @@ export function discoverProjects() {
       createdAt: now,
       updatedAt: now,
     }).run();
+
+    // Create per-project tables for new project
+    createProjectTables(id);
   }
 
   // Seed demo data

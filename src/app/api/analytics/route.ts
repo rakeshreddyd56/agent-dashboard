@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db, schema } from '@/lib/db';
-import { eq, desc } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { readStatsCache } from '@/lib/coordination/stats-cache-reader';
 import { execFileSync } from 'child_process';
+import { getProjectAnalytics, getProjectTasks, getProjectAgents } from '@/lib/db/project-queries';
+import { projectTablesExist, createProjectTables } from '@/lib/db/dynamic-tables';
 
 function getTmuxSessions(): { name: string; windows: number; created: string | null }[] {
   try {
@@ -37,39 +39,26 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'projectId required' }, { status: 400 });
     }
 
+    if (!projectTablesExist(projectId)) {
+      createProjectTables(projectId);
+    }
+
     // 1. DB snapshots (task velocity, agent activity over time)
-  const snapshots = db
-    .select()
-    .from(schema.analyticsSnapshots)
-    .where(eq(schema.analyticsSnapshots.projectId, projectId))
-    .orderBy(desc(schema.analyticsSnapshots.timestamp))
-    .limit(limit)
-    .all()
-    .reverse(); // oldest first for charts
+    const snapshots = getProjectAnalytics(projectId, { limit }).reverse(); // oldest first for charts
 
-  // 2. Current task breakdown by status
-  const tasks = db
-    .select()
-    .from(schema.tasks)
-    .where(eq(schema.tasks.projectId, projectId))
-    .all();
+    // 2. Current task breakdown by status
+    const tasks = getProjectTasks(projectId);
+    const tasksByStatus: Record<string, number> = {};
+    for (const t of tasks) {
+      tasksByStatus[t.status] = (tasksByStatus[t.status] || 0) + 1;
+    }
 
-  const tasksByStatus: Record<string, number> = {};
-  for (const t of tasks) {
-    tasksByStatus[t.status] = (tasksByStatus[t.status] || 0) + 1;
-  }
-
-  // 3. Current agent statuses
-  const agents = db
-    .select()
-    .from(schema.agentSnapshots)
-    .where(eq(schema.agentSnapshots.projectId, projectId))
-    .all();
-
-  const agentsByStatus: Record<string, number> = {};
-  for (const a of agents) {
-    agentsByStatus[a.status] = (agentsByStatus[a.status] || 0) + 1;
-  }
+    // 3. Current agent statuses
+    const agents = getProjectAgents(projectId);
+    const agentsByStatus: Record<string, number> = {};
+    for (const a of agents) {
+      agentsByStatus[a.status] = (agentsByStatus[a.status] || 0) + 1;
+    }
 
   // 4. Real cost data from Claude stats-cache
   const statsCache = readStatsCache();
