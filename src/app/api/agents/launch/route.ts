@@ -4,6 +4,9 @@ import { eq } from 'drizzle-orm';
 import { execFileSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
+import { upsertProjectAgent } from '@/lib/db/project-queries';
+import { projectTablesExist, createProjectTables } from '@/lib/db/dynamic-tables';
+import { eventBus } from '@/lib/events/event-bus';
 
 // Only allow safe characters in role/session names
 function sanitizeName(name: string): string | null {
@@ -37,6 +40,27 @@ cd "$(dirname "$0")/.."
 
 unset CLAUDECODE
 
+# Register agent in coordination registry
+COORD_DIR=".claude/coordination"
+REGISTRY="\${COORD_DIR}/registry.json"
+mkdir -p "\${COORD_DIR}"
+NOW=\$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
+
+if command -v python3 &>/dev/null; then
+  python3 -c "
+import json, os, sys
+reg_path = '\${REGISTRY}'
+try:
+    with open(reg_path) as f: reg = json.load(f)
+except: reg = {'agents': []}
+if not isinstance(reg.get('agents'), list): reg['agents'] = []
+agents = [a for a in reg['agents'] if a.get('name') != '${role}']
+agents.append({'name': '${role}', 'role': '${role}', 'status': 'working', 'current_task': '', 'session_start': '\${NOW}', 'last_heartbeat': '\${NOW}'})
+reg['agents'] = agents
+with open(reg_path, 'w') as f: json.dump(reg, f, indent=2)
+" 2>/dev/null || true
+fi
+
 ${systemPromptLine}
 
 exec claude \\
@@ -47,6 +71,83 @@ exec claude \\
 
   fs.writeFileSync(scriptPath, script, { mode: 0o755 });
   return scriptPath;
+}
+
+// Register a launched agent in DB + coordination files so it appears immediately
+function registerLaunchedAgent(projectId: string, role: string, coordinationPath: string): void {
+  const now = new Date().toISOString();
+  const agentId = role; // Use role as agent ID (matches convention)
+
+  // 1. Ensure per-project tables exist
+  if (!projectTablesExist(projectId)) {
+    createProjectTables(projectId);
+  }
+
+  // 2. Insert into per-project DB
+  upsertProjectAgent(projectId, {
+    id: `${projectId}-${agentId}`,
+    agent_id: agentId,
+    role,
+    status: 'initializing',
+    current_task: null,
+    model: 'claude-sonnet-4-6',
+    session_start: now,
+    last_heartbeat: now,
+    locked_files: '[]',
+    progress: 0,
+    estimated_cost: 0,
+    created_at: now,
+  });
+
+  // 3. Update coordination registry.json so file-watcher picks it up
+  try {
+    const registryPath = path.join(coordinationPath, 'registry.json');
+    let registry: { agents: Record<string, unknown>[] } = { agents: [] };
+    if (fs.existsSync(registryPath)) {
+      try {
+        registry = JSON.parse(fs.readFileSync(registryPath, 'utf-8'));
+        if (!Array.isArray(registry.agents)) registry.agents = [];
+      } catch { registry = { agents: [] }; }
+    }
+
+    // Update or add agent entry
+    const existingIdx = registry.agents.findIndex(
+      (a) => (a.name === agentId || a.name === role)
+    );
+    const agentEntry = {
+      name: agentId,
+      role,
+      status: 'initializing',
+      current_task: '',
+      session_start: now,
+      last_heartbeat: now,
+    };
+
+    if (existingIdx >= 0) {
+      registry.agents[existingIdx] = agentEntry;
+    } else {
+      registry.agents.push(agentEntry);
+    }
+
+    fs.writeFileSync(registryPath, JSON.stringify(registry, null, 2), 'utf-8');
+  } catch {
+    // Non-fatal — DB registration is the critical path
+  }
+
+  // 4. Broadcast SSE event for immediate UI update
+  eventBus.broadcast('agent.updated', {
+    projectId,
+    agentId,
+    id: `${projectId}-${agentId}`,
+    role,
+    status: 'initializing',
+    sessionStart: now,
+    lastHeartbeat: now,
+    lockedFiles: [],
+    progress: 0,
+    estimatedCost: 0,
+    createdAt: now,
+  }, projectId);
 }
 
 function getTmuxSessions(): string[] {
@@ -272,6 +373,8 @@ export async function POST(req: NextRequest) {
           timeout: 10000,
           env: { ...process.env, CLAUDECODE: undefined },
         });
+        // Register agent immediately in DB + coordination files
+        registerLaunchedAgent(projectId as string, sanitizedRole, project.coordinationPath);
         results.push({ role: sanitizedRole, status: 'launched', session: sessionName });
       } catch (err) {
         results.push({
@@ -280,6 +383,30 @@ export async function POST(req: NextRequest) {
           error: err instanceof Error ? err.message : 'Launch failed',
         });
       }
+    }
+
+    // Broadcast full agent sync so PixelOffice updates immediately
+    if (results.some((r) => r.status === 'launched')) {
+      try {
+        const { getProjectAgents } = await import('@/lib/db/project-queries');
+        const allAgents = getProjectAgents(projectId as string);
+        const mapped = allAgents.map((a) => ({
+          id: a.id,
+          projectId: projectId as string,
+          agentId: a.agent_id,
+          role: a.role,
+          status: a.status,
+          currentTask: a.current_task,
+          model: a.model,
+          sessionStart: a.session_start,
+          lastHeartbeat: a.last_heartbeat,
+          lockedFiles: JSON.parse(a.locked_files || '[]'),
+          progress: a.progress,
+          estimatedCost: a.estimated_cost,
+          createdAt: a.created_at,
+        }));
+        eventBus.broadcast('agent.synced', { projectId, agents: mapped }, projectId as string);
+      } catch { /* non-fatal */ }
     }
 
     return NextResponse.json({ results });
