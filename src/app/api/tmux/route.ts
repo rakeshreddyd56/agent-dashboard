@@ -64,6 +64,28 @@ export async function GET(req: NextRequest) {
         });
       }
 
+      case 'kill': {
+        const session = searchParams.get('session');
+        if (!session) {
+          return NextResponse.json({ error: 'session parameter required' }, { status: 400 });
+        }
+
+        const sanitized = sanitizeSessionName(session);
+        if (!sanitized) {
+          return NextResponse.json({ error: 'Invalid session name' }, { status: 400 });
+        }
+
+        try {
+          execSync(`tmux kill-session -t ${sanitized} 2>/dev/null`, {
+            encoding: 'utf-8',
+            timeout: 5000,
+          });
+          return NextResponse.json({ killed: true, session: sanitized });
+        } catch {
+          return NextResponse.json({ killed: false, session: sanitized, error: 'Session not found or already dead' });
+        }
+      }
+
       default:
         return NextResponse.json({ error: `Unknown action: ${action}` }, { status: 400 });
     }

@@ -59,6 +59,14 @@ export const MODEL_COSTS: Record<string, number> = {
   'claude-haiku-4-5': 0.25,
 };
 
+export const AUTO_RELAY_CONFIG = {
+  enabled: true,
+  intervalMs: 60_000,
+  maxRelaysPerAgent: 10,
+  cooldownMs: 30_000,
+  excludedRoles: ['coordinator'] as string[],
+};
+
 export const HEARTBEAT_THRESHOLDS = {
   healthy: 60_000,    // < 60s = green
   warning: 300_000,   // < 5min = yellow

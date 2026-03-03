@@ -169,14 +169,17 @@ function bfs(from: Vec, to: Vec): Vec[] {
 interface PixelOfficeProps {
   agents: AgentSnapshot[];
   compact?: boolean;
+  projectName?: string;
 }
 
-export function PixelOffice({ agents, compact }: PixelOfficeProps) {
+export function PixelOffice({ agents, compact, projectName }: PixelOfficeProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const simsRef = useRef<AgentSim[]>([]);
   const spritesRef = useRef<(HTMLImageElement | null)[]>([]);
   const furnitureImgsRef = useRef<Map<string, HTMLImageElement>>(new Map());
   const tickRef = useRef(0);
+  const projectNameRef = useRef(projectName);
+  projectNameRef.current = projectName; // Always keep ref in sync with prop
   const [loaded, setLoaded] = useState(false);
 
   // Show ALL agents including offline — they'll sit dimmed at their desk
@@ -357,7 +360,7 @@ export function PixelOffice({ agents, compact }: PixelOfficeProps) {
       ctx.fillStyle = '#c8a87a';
       ctx.font = `bold ${Z * 3}px monospace`;
       ctx.textAlign = 'center';
-      ctx.fillText("LUFFY'S HQ", 8 * T, T * 0.65);
+      ctx.fillText((projectNameRef.current || 'AGENT HQ').toUpperCase(), 8 * T, T * 0.65);
       // Room labels
       ctx.fillStyle = '#8a7050';
       ctx.font = `${Z * 2.5}px monospace`;

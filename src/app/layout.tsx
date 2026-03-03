@@ -18,8 +18,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Luffy's HQ — Agent Command Center",
-  description: "Luffy's HQ — Multi-agent coordination command center",
+  title: "Agent Command Center",
+  description: "Multi-agent coordination command center",
 };
 
 export default function RootLayout({

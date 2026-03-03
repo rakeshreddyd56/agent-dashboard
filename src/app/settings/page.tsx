@@ -24,6 +24,8 @@ import {
   Loader2,
   Monitor,
   Terminal,
+  RefreshCw,
+  Power,
 } from 'lucide-react';
 
 interface DirEntry {
@@ -42,13 +44,25 @@ interface PathMarkers {
   packageJson: boolean;
 }
 
+interface ActiveSession {
+  name: string;
+  status: string;
+  created: string;
+}
+
 export default function SettingsPage() {
   const { projects, setProjects } = useProjectStore();
+  const activeProjectId = useProjectStore((s) => s.activeProjectId);
   const [newName, setNewName] = useState('');
   const [newPath, setNewPath] = useState('');
   const [newGitUrl, setNewGitUrl] = useState('');
   const [addingProject, setAddingProject] = useState(false);
   const [addResult, setAddResult] = useState<{ success: boolean; message: string } | null>(null);
+  // Active sessions state
+  const [activeSessions, setActiveSessions] = useState<ActiveSession[]>([]);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [killingSession, setKillingSession] = useState<string | null>(null);
+
   // Pixel-agents state
   const [pixelStatus, setPixelStatus] = useState<{
     extension: { installed: boolean; location: string | null; version: string | null };
@@ -95,6 +109,41 @@ export default function SettingsPage() {
     } finally {
       setPixelInstalling(false);
     }
+  };
+
+  // Fetch active tmux sessions for the active project
+  const fetchActiveSessions = useCallback(() => {
+    if (!activeProjectId) { setActiveSessions([]); return; }
+    setSessionsLoading(true);
+    fetch(`/api/agents/launch?projectId=${activeProjectId}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.activeSessions) {
+          setActiveSessions(
+            (data.activeSessions as string[]).map((name: string) => ({
+              name,
+              status: data.agentScripts?.find((s: { role: string; running: boolean }) =>
+                name.includes(s.role))?.running ? 'running' : 'active',
+              created: '',
+            }))
+          );
+        }
+      })
+      .catch(() => setActiveSessions([]))
+      .finally(() => setSessionsLoading(false));
+  }, [activeProjectId]);
+
+  useEffect(() => {
+    fetchActiveSessions();
+  }, [fetchActiveSessions]);
+
+  const handleKillSession = async (sessionName: string) => {
+    setKillingSession(sessionName);
+    try {
+      await fetch(`/api/tmux?action=kill&session=${encodeURIComponent(sessionName)}`);
+      setTimeout(fetchActiveSessions, 1000);
+    } catch { /* ignore */ }
+    finally { setKillingSession(null); }
   };
 
   // Check path markers when path changes
@@ -205,7 +254,7 @@ export default function SettingsPage() {
             <CardHeader>
               <CardTitle className="text-sm">Registered Projects</CardTitle>
               <CardDescription className="text-xs">
-                Luffy&apos;s HQ projects monitored for agent activity
+                Registered projects monitored for agent activity
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -231,6 +280,66 @@ export default function SettingsPage() {
                   </Button>
                 </div>
               ))}
+            </CardContent>
+          </Card>
+
+          {/* Active Sessions */}
+          <Card className="border-border/50">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="text-sm">Active Sessions</CardTitle>
+                  <CardDescription className="text-xs">
+                    Tmux sessions for the active project
+                  </CardDescription>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={fetchActiveSessions}
+                  disabled={sessionsLoading}
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${sessionsLoading ? 'animate-spin' : ''}`} />
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {!activeProjectId ? (
+                <p className="text-xs text-muted-foreground">No project selected</p>
+              ) : activeSessions.length === 0 ? (
+                <p className="text-xs text-muted-foreground">No active tmux sessions</p>
+              ) : (
+                <div className="space-y-2">
+                  {activeSessions.map((session) => (
+                    <div key={session.name} className="flex items-center justify-between rounded-lg border border-border/50 p-2.5">
+                      <div className="flex items-center gap-2">
+                        <span className="h-2 w-2 rounded-full bg-[#3dba8a] animate-pulse" />
+                        <div>
+                          <span className="text-xs font-medium font-mono">{session.name}</span>
+                        </div>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-destructive hover:bg-destructive/10"
+                        onClick={() => handleKillSession(session.name)}
+                        disabled={killingSession === session.name}
+                        title="Kill session"
+                      >
+                        {killingSession === session.name ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Power className="h-3.5 w-3.5" />
+                        )}
+                      </Button>
+                    </div>
+                  ))}
+                  <p className="text-[10px] text-muted-foreground mt-1">
+                    {activeSessions.length} session{activeSessions.length !== 1 ? 's' : ''} active
+                  </p>
+                </div>
+              )}
             </CardContent>
           </Card>
 
@@ -388,7 +497,7 @@ export default function SettingsPage() {
             <CardHeader>
               <CardTitle className="text-sm">Theme</CardTitle>
               <CardDescription className="text-xs">
-                Luffy&apos;s HQ forest theme. Light mode coming soon.
+                Dashboard forest theme. Light mode coming soon.
               </CardDescription>
             </CardHeader>
             <CardContent>

@@ -1,6 +1,7 @@
 import { db, schema } from '@/lib/db';
 import { eq, and, not, lt, inArray } from 'drizzle-orm';
 import { eventBus } from '@/lib/events/event-bus';
+import { AUTO_RELAY_CONFIG } from '@/lib/constants';
 
 /**
  * Background Scheduler — Runs periodic tasks on a 60s tick loop.
@@ -62,6 +63,15 @@ export function initScheduler() {
     enabled: true,
   });
 
+  tasks.set('auto_relay', {
+    name: 'Auto-Relay Agent Check',
+    intervalMs: AUTO_RELAY_CONFIG.intervalMs,
+    lastRun: null,
+    nextRun: now + AUTO_RELAY_CONFIG.intervalMs,
+    running: false,
+    enabled: AUTO_RELAY_CONFIG.enabled,
+  });
+
   tickTimer = setInterval(tick, TICK_INTERVAL);
 }
 
@@ -87,6 +97,9 @@ async function tick() {
           break;
         case 'sync_verification':
           result = await runSyncVerification();
+          break;
+        case 'auto_relay':
+          result = await runAutoRelayTask();
           break;
         default:
           result = { ok: true, message: 'Unknown task' };
@@ -186,6 +199,38 @@ async function runSyncVerification(): Promise<{ ok: boolean; message: string }> 
     return { ok: true, message: `Synced project: ${activeProject.name}` };
   } catch (err) {
     return { ok: false, message: `Sync failed: ${err instanceof Error ? err.message : 'unknown'}` };
+  }
+}
+
+/** Run auto-relay check for all active projects */
+async function runAutoRelayTask(): Promise<{ ok: boolean; message: string }> {
+  const activeProjects = db
+    .select()
+    .from(schema.projects)
+    .where(eq(schema.projects.isActive, true))
+    .all();
+
+  if (activeProjects.length === 0) {
+    return { ok: true, message: 'No active projects for relay' };
+  }
+
+  try {
+    const { runAutoRelay } = await import('@/lib/coordination/relay');
+    const results: string[] = [];
+
+    for (const project of activeProjects) {
+      const result = await runAutoRelay(project.id);
+      if (result.relayed > 0 || result.noTasks > 0) {
+        results.push(`${project.name}: ${result.relayed} relayed, ${result.skipped} skipped, ${result.noTasks} no-tasks`);
+      }
+    }
+
+    return {
+      ok: true,
+      message: results.length > 0 ? results.join('; ') : 'No relay actions needed',
+    };
+  } catch (err) {
+    return { ok: false, message: `Relay failed: ${err instanceof Error ? err.message : 'unknown'}` };
   }
 }
 

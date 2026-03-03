@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
+import { useProjectStore } from '@/lib/store/project-store';
 import {
   LayoutDashboard,
   Columns3,
@@ -30,12 +31,13 @@ const navItems = [
 
 export function Sidebar() {
   const pathname = usePathname();
+  const projectName = useProjectStore((s) => s.projects.find((p) => p.id === s.activeProjectId)?.name || 'Agent Dashboard');
 
   return (
     <aside className="fixed left-0 top-0 z-40 flex h-screen w-60 flex-col border-r border-border bg-card">
       <div className="flex h-14 items-center gap-2 border-b border-border px-4">
         <Shell className="h-6 w-6 text-primary" />
-        <span className="text-lg font-semibold tracking-tight">Luffy&apos;s HQ</span>
+        <span className="text-lg font-semibold tracking-tight truncate">{projectName}</span>
       </div>
 
       <nav className="flex-1 space-y-1 px-2 py-3">
@@ -63,7 +65,7 @@ export function Sidebar() {
       </nav>
 
       <div className="border-t border-border p-4">
-        <p className="text-xs text-muted-foreground">Luffy&apos;s HQ</p>
+        <p className="text-xs text-muted-foreground truncate">{projectName}</p>
         <p className="text-xs text-muted-foreground">Agent Command Center v1.0</p>
       </div>
     </aside>

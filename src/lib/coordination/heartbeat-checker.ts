@@ -125,5 +125,12 @@ export function checkStaleAgents(projectId: string): void {
       createdAt: a.created_at,
     }));
     eventBus.broadcast('agent.synced', { agents: mapped }, projectId);
+
+    // Proactively trigger auto-relay when agents complete
+    try {
+      import('@/lib/coordination/relay').then(({ runAutoRelay }) => {
+        runAutoRelay(projectId).catch(() => {});
+      }).catch(() => {});
+    } catch { /* non-fatal */ }
   }
 }

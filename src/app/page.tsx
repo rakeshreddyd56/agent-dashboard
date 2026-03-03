@@ -17,6 +17,7 @@ export default function DashboardPage() {
   const allTasks = useTaskStore((s) => s.tasks);
   const allAgents = useAgentStore((s) => s.agents);
   const activeProjectId = useProjectStore((s) => s.activeProjectId);
+  const projectName = useProjectStore((s) => s.projects.find((p) => p.id === s.activeProjectId)?.name || 'Agent Dashboard');
 
   // Filter by active project
   const tasks = activeProjectId ? allTasks.filter((t) => t.projectId === activeProjectId) : allTasks;
@@ -33,7 +34,7 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Luffy&apos;s HQ</h1>
+      <h1 className="text-2xl font-bold">{projectName} HQ</h1>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
@@ -68,16 +69,15 @@ export default function DashboardPage() {
 
       <TaskFlowMini tasks={tasks} />
 
-      {/* Luffy's HQ — Crew Live */}
       <Card className="border-border/50 overflow-hidden">
         <CardHeader className="pb-2">
           <CardTitle className="text-sm font-medium flex items-center gap-2">
             <span className="inline-block h-2 w-2 rounded-full bg-[#0d7a4a] animate-pulse" />
-            Luffy&apos;s HQ — Crew Live
+            {projectName} — Agents Live
           </CardTitle>
         </CardHeader>
         <CardContent className="flex justify-center py-3">
-          <PixelOffice agents={agents} />
+          <PixelOffice agents={agents} projectName={projectName} />
         </CardContent>
       </Card>
 

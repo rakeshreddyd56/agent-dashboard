@@ -15,6 +15,69 @@ function sanitizeName(name: string): string | null {
 }
 
 // Auto-generate a runner script for an agent role
+// Generate a task-specific runner script for relay launches
+// Sanitize text for safe embedding in shell scripts
+function sanitizeForShell(text: string): string {
+  return text.replace(/['"\\`$!]/g, '').replace(/[^a-zA-Z0-9 ._:,;()\-/]/g, '').slice(0, 200);
+}
+
+function generateTaskRunnerScript(projectPath: string, role: string, projectName: string, taskId: string, taskTitle: string): string {
+  const scriptsDir = path.join(projectPath, 'scripts');
+  if (!fs.existsSync(scriptsDir)) {
+    fs.mkdirSync(scriptsDir, { recursive: true });
+  }
+
+  // Task-specific script — always regenerated
+  const scriptPath = path.join(scriptsDir, `run-${role}-relay.sh`);
+
+  const agentMdPath = path.join(projectPath, '.claude', 'agents', `${role}.md`);
+  const hasAgentTemplate = fs.existsSync(agentMdPath);
+
+  const systemPromptLine = hasAgentTemplate
+    ? `SYSTEM_PROMPT="$(cat .claude/agents/${role}.md)"`
+    : `SYSTEM_PROMPT="You are the ${role} agent for the ${projectName} project. Work from the coordination directory at .claude/coordination/ to pick up tasks, update status, and coordinate with other agents. Check TASKS.md for your assignments."`;
+
+  const script = `#!/usr/bin/env bash
+# Auto-relay runner script for ${role} agent — task ${taskId}
+# Project: ${projectName}
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+unset CLAUDECODE
+
+# Register agent in coordination registry
+COORD_DIR=".claude/coordination"
+REGISTRY="\${COORD_DIR}/registry.json"
+mkdir -p "\${COORD_DIR}"
+NOW=\$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
+
+if command -v python3 &>/dev/null; then
+  python3 -c "
+import json, os, sys
+reg_path = '\${REGISTRY}'
+try:
+    with open(reg_path) as f: reg = json.load(f)
+except: reg = {'agents': []}
+if not isinstance(reg.get('agents'), list): reg['agents'] = []
+agents = [a for a in reg['agents'] if a.get('name') != '${role}']
+agents.append({'name': '${role}', 'role': '${role}', 'status': 'working', 'current_task': '${taskId}', 'session_start': '\${NOW}', 'last_heartbeat': '\${NOW}'})
+reg['agents'] = agents
+with open(reg_path, 'w') as f: json.dump(reg, f, indent=2)
+" 2>/dev/null || true
+fi
+
+${systemPromptLine}
+
+exec claude \\
+  --system-prompt "$SYSTEM_PROMPT" \\
+  --allowedTools "Read,Write,Edit,Bash,Grep,Glob" \\
+  -p "Work on task ${taskId}: ${sanitizeForShell(taskTitle)}. Read .claude/coordination/TASKS.md for details. Update task status as you progress."
+`;
+
+  fs.writeFileSync(scriptPath, script, { mode: 0o755 });
+  return scriptPath;
+}
+
 function generateRunnerScript(projectPath: string, role: string, projectName: string): string {
   const scriptsDir = path.join(projectPath, 'scripts');
   if (!fs.existsSync(scriptsDir)) {
@@ -241,7 +304,7 @@ export async function POST(req: NextRequest) {
     } catch {
       return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
     }
-    const { projectId, agents: agentRoles, launchAll } = body;
+    const { projectId, agents: agentRoles, launchAll, task: taskParam } = body;
 
     if (!projectId) {
       return NextResponse.json({ error: 'projectId required' }, { status: 400 });
@@ -344,17 +407,53 @@ export async function POST(req: NextRequest) {
 
       const sessionName = `${prefix}-${sanitizedRole}`;
 
-      // Check if already running
+      // Check if already running — but allow relaunch if agent status is completed/offline
       if (activeSessions.includes(sessionName)) {
-        results.push({ role: sanitizedRole, status: 'already_running', session: sessionName });
-        continue;
+        // Check DB status — if completed or offline, kill the stale session and relaunch
+        let shouldKill = false;
+        try {
+          const { getProjectAgents } = await import('@/lib/db/project-queries');
+          const dbAgents = getProjectAgents(projectId as string);
+          const dbAgent = dbAgents.find((a) => a.agent_id === sanitizedRole);
+          if (dbAgent && (dbAgent.status === 'completed' || dbAgent.status === 'offline')) {
+            shouldKill = true;
+          }
+        } catch { /* fallback: treat as running */ }
+
+        if (shouldKill) {
+          try {
+            execFileSync('tmux', ['kill-session', '-t', sessionName], {
+              encoding: 'utf-8',
+              timeout: 5000,
+              stdio: ['pipe', 'pipe', 'pipe'],
+            });
+          } catch { /* session may already be gone */ }
+        } else {
+          results.push({ role: sanitizedRole, status: 'already_running', session: sessionName });
+          continue;
+        }
       }
 
-      // Auto-generate run script if it doesn't exist
-      let scriptPath = path.join(scriptsDir, `run-${sanitizedRole}.sh`);
+      // Use task-specific relay script or standard run script
+      const taskInfo = taskParam as { id: string; title: string } | undefined;
+      let scriptFile: string;
+      if (taskInfo?.id) {
+        try {
+          generateTaskRunnerScript(project.path, sanitizedRole, project.name, taskInfo.id, taskInfo.title);
+          scriptFile = `run-${sanitizedRole}-relay.sh`;
+        } catch {
+          scriptFile = `run-${sanitizedRole}.sh`;
+        }
+      } else {
+        scriptFile = `run-${sanitizedRole}.sh`;
+      }
+
+      // Auto-generate standard run script if it doesn't exist
+      let scriptPath = path.join(scriptsDir, scriptFile);
       if (!fs.existsSync(scriptPath)) {
         try {
           scriptPath = generateRunnerScript(project.path, sanitizedRole, project.name);
+          scriptFile = `run-${sanitizedRole}.sh`;
         } catch (genErr) {
           results.push({ role: sanitizedRole, status: 'error', error: `Failed to generate script: ${genErr instanceof Error ? genErr.message : String(genErr)}` });
           continue;
@@ -362,7 +461,7 @@ export async function POST(req: NextRequest) {
       }
 
       try {
-        const shellCmd = `bash scripts/run-${sanitizedRole}.sh 2>&1 | tee /tmp/${sessionName}.log; echo '${sanitizedRole.toUpperCase()} DONE'; sleep 999999`;
+        const shellCmd = `bash scripts/${scriptFile} 2>&1 | tee /tmp/${sessionName}.log; echo '${sanitizedRole.toUpperCase()} DONE'; sleep 999999`;
         execFileSync('tmux', [
           'new-session', '-d',
           '-s', sessionName,
@@ -413,5 +512,69 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     console.error('POST /api/agents/launch error:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}
+
+/**
+ * Direct server-side agent launch with a specific task (for relay system).
+ * Avoids HTTP round-trip when called from the same process.
+ */
+export async function launchAgentWithTask(
+  projectId: string,
+  agentId: string,
+  taskId: string,
+  taskTitle: string,
+): Promise<boolean> {
+  try {
+    const project = db
+      .select()
+      .from(schema.projects)
+      .where(eq(schema.projects.id, projectId))
+      .get();
+
+    if (!project || !fs.existsSync(project.path)) return false;
+
+    const sanitizedRole = sanitizeName(agentId);
+    if (!sanitizedRole) return false;
+
+    const prefix = getProjectPrefix(project.name);
+    const sessionName = `${prefix}-${sanitizedRole}`;
+    const activeSessions = getTmuxSessions();
+
+    // Kill existing completed/idle session if it exists
+    if (activeSessions.includes(sessionName)) {
+      try {
+        execFileSync('tmux', ['kill-session', '-t', sessionName], {
+          encoding: 'utf-8',
+          timeout: 5000,
+          stdio: ['pipe', 'pipe', 'pipe'],
+        });
+      } catch { /* session might already be gone */ }
+    }
+
+    // Generate task-specific relay script
+    generateTaskRunnerScript(project.path, sanitizedRole, project.name, taskId, taskTitle);
+
+    const scriptFile = `run-${sanitizedRole}-relay.sh`;
+    const shellCmd = `bash scripts/${scriptFile} 2>&1 | tee /tmp/${sessionName}.log; echo '${sanitizedRole.toUpperCase()} DONE'; sleep 999999`;
+
+    execFileSync('tmux', [
+      'new-session', '-d',
+      '-s', sessionName,
+      '-c', project.path,
+      shellCmd,
+    ], {
+      encoding: 'utf-8',
+      timeout: 10000,
+      env: { ...process.env, CLAUDECODE: undefined },
+    });
+
+    // Register agent in DB
+    registerLaunchedAgent(projectId, sanitizedRole, project.coordinationPath);
+
+    return true;
+  } catch (err) {
+    console.error('launchAgentWithTask error:', err);
+    return false;
   }
 }

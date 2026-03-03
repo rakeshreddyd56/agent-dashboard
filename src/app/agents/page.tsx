@@ -19,11 +19,12 @@ export default function AgentsPage() {
   const allAgents = useAgentStore((s) => s.agents);
   const events = useEventStore((s) => s.events);
   const activeProjectId = useProjectStore((s) => s.activeProjectId);
+  const projectName = useProjectStore((s) => s.projects.find((p) => p.id === s.activeProjectId)?.name || 'Agent Dashboard');
   const agents = activeProjectId ? allAgents.filter((a) => a.projectId === activeProjectId) : allAgents;
   const [launching, setLaunching] = useState(false);
   const [launchMsg, setLaunchMsg] = useState<string | null>(null);
 
-  const offlineCount = agents.filter((a) => a.status === 'offline').length;
+  const offlineCount = agents.filter((a) => a.status === 'offline' || a.status === 'completed').length;
   const activeCount = agents.filter((a) => ['working', 'planning', 'reviewing'].includes(a.status)).length;
 
   const handleLaunchAll = async () => {
@@ -53,11 +54,11 @@ export default function AgentsPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Luffy&apos;s Crew</h1>
+        <h1 className="text-2xl font-bold">{projectName} Agents</h1>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <Badge variant="secondary" className="text-[10px]">{activeCount} active</Badge>
-            <Badge variant="outline" className="text-[10px]">{offlineCount} offline</Badge>
+            <Badge variant="outline" className="text-[10px]">{offlineCount} idle</Badge>
           </div>
           {offlineCount > 0 && (
             <Button
@@ -91,12 +92,12 @@ export default function AgentsPage() {
             ) : (
               <span className="inline-block h-2 w-2 rounded-full bg-[#476256]" />
             )}
-            Luffy&apos;s HQ — Crew {activeCount > 0 ? 'Live' : 'Standby'}
+            {projectName} — Agents {activeCount > 0 ? 'Live' : 'Standby'}
           </CardTitle>
         </CardHeader>
         <CardContent className="flex justify-center py-4 overflow-x-auto">
           <div className="max-w-full">
-            <PixelOffice agents={agents} />
+            <PixelOffice agents={agents} projectName={projectName} />
           </div>
         </CardContent>
       </Card>
