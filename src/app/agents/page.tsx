@@ -93,7 +93,7 @@ export default function AgentsPage() {
       });
       const data = await res.json();
       const st = data.results?.[0]?.status;
-      setLaunchMsg(st === 'launched' ? 'Rataa launched' : st === 'already_running' ? 'Rataa already running' : 'Launch failed');
+      setLaunchMsg(st === 'launched' ? 'Raata launched' : st === 'already_running' ? 'Raata already running' : 'Launch failed');
     } catch {
       setLaunchMsg('Launch failed');
     } finally {
@@ -120,7 +120,7 @@ export default function AgentsPage() {
               disabled={launching}
             >
               <Eye className="h-3.5 w-3.5" />
-              Launch Rataa
+              Launch Raata
             </Button>
           )}
           {offlineCount > 0 && (
@@ -140,7 +140,7 @@ export default function AgentsPage() {
             </Button>
           )}
           {launchMsg && (
-            <span className={`text-xs ${launchMsg.includes('launched') || launchMsg.includes('Rataa') ? 'text-[#3dba8a]' : 'text-[#e05252]'}`}>
+            <span className={`text-xs ${launchMsg.includes('launched') || launchMsg.includes('Raata') ? 'text-[#3dba8a]' : 'text-[#e05252]'}`}>
               {launchMsg}
             </span>
           )}

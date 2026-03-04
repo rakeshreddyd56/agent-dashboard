@@ -150,41 +150,44 @@ function generateSupervisorScript(projectPath: string, projectName: string, proj
 
   const pid = sanitizeForShell(projectId);
   const pname = sanitizeForShell(projectName);
+  // Detect dashboard port from environment or Next.js config
+  const dashboardPort = process.env.PORT || '4000';
+  const dashboardUrl = `http://localhost:${dashboardPort}`;
   const systemPromptLine = hasAgentTemplate
     ? `SYSTEM_PROMPT="$(cat .claude/agents/supervisor.md)"`
-    : `SYSTEM_PROMPT="You are Rataa, autonomous supervisor for ${pname}. You DO NOT ask permission. You DO NOT report findings. You EXECUTE actions immediately using the bash curl commands below. NEVER say 'shall I' or 'should I' — just DO IT.
+    : `SYSTEM_PROMPT="You are Raata, autonomous supervisor for ${pname}. You DO NOT ask permission. You DO NOT report findings. You EXECUTE actions immediately using the bash curl commands below. NEVER say 'shall I' or 'should I' — just DO IT.
 
 PROJECT_ID: ${pid}
-DASHBOARD: http://localhost:3000
+DASHBOARD: ${dashboardUrl}
 
 == COMMANDS (execute via Bash tool with curl) ==
 
 CHECK AGENTS:
-  curl -s http://localhost:3000/api/agent-actions?action=list-agents\\&projectId=${pid}
+  curl -s ${dashboardUrl}/api/agent-actions?action=list-agents\\&projectId=${pid}
 
 CHECK BOARD:
-  curl -s http://localhost:3000/api/agent-actions?action=board-summary\\&projectId=${pid}
+  curl -s ${dashboardUrl}/api/agent-actions?action=board-summary\\&projectId=${pid}
 
 READ MISSION:
-  curl -s http://localhost:3000/api/agent-actions?action=read-mission\\&projectId=${pid}
+  curl -s ${dashboardUrl}/api/agent-actions?action=read-mission\\&projectId=${pid}
 
 LIST PENDING TASKS:
-  curl -s http://localhost:3000/api/agent-actions?action=list-tasks\\&projectId=${pid}\\&status=TODO
+  curl -s ${dashboardUrl}/api/agent-actions?action=list-tasks\\&projectId=${pid}\\&status=TODO
 
 SPAWN AGENTS (replace ROLE and TASK fields):
-  curl -s -X POST http://localhost:3000/api/agents/launch -H 'Content-Type: application/json' -d '{\\\"projectId\\\":\\\"${pid}\\\",\\\"agents\\\":[\\\"ROLE\\\"],\\\"task\\\":{\\\"id\\\":\\\"TASK_ID\\\",\\\"title\\\":\\\"TASK_TITLE\\\"}}'
+  curl -s -X POST ${dashboardUrl}/api/agents/launch -H 'Content-Type: application/json' -d '{\\\"projectId\\\":\\\"${pid}\\\",\\\"agents\\\":[\\\"ROLE\\\"],\\\"task\\\":{\\\"id\\\":\\\"TASK_ID\\\",\\\"title\\\":\\\"TASK_TITLE\\\"}}'
 
 SPAWN ALL IDLE AGENTS AT ONCE:
-  curl -s -X POST http://localhost:3000/api/agents/launch -H 'Content-Type: application/json' -d '{\\\"projectId\\\":\\\"${pid}\\\",\\\"agents\\\":[\\\"coder\\\",\\\"coder-2\\\",\\\"reviewer\\\",\\\"tester\\\",\\\"architect\\\",\\\"security-auditor\\\",\\\"devops\\\"]}'
+  curl -s -X POST ${dashboardUrl}/api/agents/launch -H 'Content-Type: application/json' -d '{\\\"projectId\\\":\\\"${pid}\\\",\\\"agents\\\":[\\\"coder\\\",\\\"coder-2\\\",\\\"reviewer\\\",\\\"tester\\\",\\\"architect\\\",\\\"security-auditor\\\",\\\"devops\\\"]}'
 
 MOVE TASK STATUS (use DONE, IN_PROGRESS, TODO):
-  curl -s -X POST http://localhost:3000/api/agent-actions -H 'Content-Type: application/json' -d '{\\\"action\\\":\\\"move-task\\\",\\\"projectId\\\":\\\"${pid}\\\",\\\"taskId\\\":\\\"TASK_ID\\\",\\\"status\\\":\\\"DONE\\\"}'
+  curl -s -X POST ${dashboardUrl}/api/agent-actions -H 'Content-Type: application/json' -d '{\\\"action\\\":\\\"move-task\\\",\\\"projectId\\\":\\\"${pid}\\\",\\\"taskId\\\":\\\"TASK_ID\\\",\\\"status\\\":\\\"DONE\\\"}'
 
 SEND MESSAGE TO AGENT:
-  curl -s -X POST http://localhost:3000/api/agent-actions -H 'Content-Type: application/json' -d '{\\\"action\\\":\\\"send-message\\\",\\\"projectId\\\":\\\"${pid}\\\",\\\"fromAgent\\\":\\\"supervisor\\\",\\\"toAgent\\\":\\\"AGENT_ID\\\",\\\"content\\\":\\\"MESSAGE\\\"}'
+  curl -s -X POST ${dashboardUrl}/api/agent-actions -H 'Content-Type: application/json' -d '{\\\"action\\\":\\\"send-message\\\",\\\"projectId\\\":\\\"${pid}\\\",\\\"fromAgent\\\":\\\"supervisor\\\",\\\"toAgent\\\":\\\"AGENT_ID\\\",\\\"content\\\":\\\"MESSAGE\\\"}'
 
 COMMIT AND PUSH:
-  curl -s -X POST http://localhost:3000/api/git -H 'Content-Type: application/json' -d '{\\\"projectId\\\":\\\"${pid}\\\",\\\"action\\\":\\\"commit-and-push\\\",\\\"message\\\":\\\"YOUR_MESSAGE\\\"}'
+  curl -s -X POST ${dashboardUrl}/api/git -H 'Content-Type: application/json' -d '{\\\"projectId\\\":\\\"${pid}\\\",\\\"action\\\":\\\"commit-and-push\\\",\\\"message\\\":\\\"YOUR_MESSAGE\\\"}'
 
 == MANDATORY ACTIONS EVERY CYCLE ==
 1. Check agents. For EVERY offline/completed agent, IMMEDIATELY spawn them with a pending task. Do not skip this.
@@ -195,7 +198,7 @@ COMMIT AND PUSH:
 
   // Supervisor runs in a bash loop — each iteration is one supervision cycle
   const script = `#!/usr/bin/env bash
-# Supervisor (Rataa) runner script — loops every 5 minutes
+# Supervisor (Raata) runner script — loops every 5 minutes
 # Project: ${sanitizeForShell(projectName)}
 set -euo pipefail
 cd "$(dirname "$0")/.."

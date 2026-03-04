@@ -87,7 +87,7 @@ for (let r = 2; r <= 5; r++) {
   if (LAYOUT[p.y]) LAYOUT[p.y][p.x] = 4;
 });
 
-// Supervisor cubicle (Rataa's office)
+// Supervisor cubicle (Raata's office)
 const SUPERVISOR_DESK: Vec = { x: 17, y: 10 };
 if (LAYOUT[10]) { LAYOUT[10][16] = 4; LAYOUT[10][17] = 2; LAYOUT[10][18] = 4; }
 if (LAYOUT[11]) LAYOUT[11][17] = 3;
@@ -110,7 +110,7 @@ const FURNITURE: FurnitureItem[] = [
   { img: '/pixel-agents/furniture/electronics/SERVER.png', x: 16, y: 8, w: 16, h: 32 },
   { img: '/pixel-agents/furniture/electronics/SERVER.png', x: 17, y: 8, w: 16, h: 32 },
   { img: '/pixel-agents/furniture/electronics/PRINTER_DESKTOP.png', x: 18, y: 8, w: 16, h: 32 },
-  // Supervisor Rataa's cubicle
+  // Supervisor Raata's cubicle
   { img: '/pixel-agents/furniture/desks/DEFAULT_DESK.png', x: 17, y: 10, w: 32, h: 32 },
   { img: '/pixel-agents/furniture/electronics/MONITOR_CRT_ON.png', x: 16, y: 10, w: 16, h: 16 },
   { img: '/pixel-agents/furniture/chairs/CHAIR_ROTATING_FRONT.png', x: 17, y: 11, w: 16, h: 16 },
@@ -391,11 +391,11 @@ export function PixelOffice({ agents, compact, projectName }: PixelOfficeProps) 
         }
       }
 
-      // ── Rataa label (drawn after furniture so desk doesn't cover it) ──
+      // ── Raata label (drawn after furniture so desk doesn't cover it) ──
       ctx.fillStyle = '#9333ea';
       ctx.font = `bold ${Z * 2.5}px monospace`;
       ctx.textAlign = 'center';
-      ctx.fillText('Rataa', 17 * T, 9.15 * T);
+      ctx.fillText('Raata', 17 * T, 9.15 * T);
 
       // ── Update & draw agents ──
       const sims = simsRef.current;

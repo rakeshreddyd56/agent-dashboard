@@ -32,7 +32,7 @@ export const AGENT_ROLES: { role: AgentRole; label: string; icon: string; color:
   { role: 'security-auditor', label: 'Security', icon: 'Shield', color: '#a4312f' },
   { role: 'devops', label: 'DevOps', icon: 'Container', color: '#8d5a0f' },
   { role: 'coordinator', label: 'Coordinator', icon: 'Users', color: '#24556f' },
-  { role: 'supervisor', label: 'Supervisor (Rataa)', icon: 'Eye', color: '#9333ea' },
+  { role: 'supervisor', label: 'Supervisor (Raata)', icon: 'Eye', color: '#9333ea' },
 ];
 
 /* Agent status — mapped to Moltbook freshness/trust semantics

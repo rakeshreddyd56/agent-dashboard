@@ -46,7 +46,7 @@ const AVAILABLE_ROLES = [
   { id: 'security', label: 'Security', desc: 'Security auditing' },
   { id: 'devops', label: 'DevOps', desc: 'Infrastructure & CI/CD' },
   { id: 'coordinator', label: 'Coordinator', desc: 'Team orchestration' },
-  { id: 'supervisor', label: 'Supervisor (Rataa)', desc: 'Monitors progress & pushes agents' },
+  { id: 'supervisor', label: 'Supervisor (Raata)', desc: 'Monitors progress & pushes agents' },
 ];
 
 const POLL_INTERVAL = 5000;
