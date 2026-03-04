@@ -197,3 +197,13 @@ export const analyticsSnapshots = sqliteTable('analytics_snapshots', {
   totalTasks: integer('total_tasks').notNull().default(0),
   estimatedCost: real('estimated_cost').notNull().default(0),
 });
+
+export const agentSystemPrompts = sqliteTable('agent_system_prompts', {
+  id: text('id').primaryKey(),
+  projectId: text('project_id').notNull().references(() => projects.id),
+  agentRole: text('agent_role').notNull(),
+  prompt: text('prompt').notNull(),
+  missionGoal: text('mission_goal'),
+  generatedBy: text('generated_by').notNull().default('rataa'),
+  createdAt: text('created_at').notNull(),
+});

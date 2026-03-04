@@ -8,6 +8,9 @@ import { upsertProjectAgent } from '@/lib/db/project-queries';
 import { projectTablesExist, createProjectTables } from '@/lib/db/dynamic-tables';
 import { eventBus } from '@/lib/events/event-bus';
 
+// Prevent duplicate concurrent launches
+const launchingLock = new Set<string>();
+
 // Only allow safe characters in role/session names
 function sanitizeName(name: string): string | null {
   const sanitized = name.replace(/[^a-zA-Z0-9._-]/g, '');
@@ -21,7 +24,169 @@ function sanitizeForShell(text: string): string {
   return text.replace(/['"\\`$!]/g, '').replace(/[^a-zA-Z0-9 ._:,;()\-/]/g, '').slice(0, 200);
 }
 
-function generateTaskRunnerScript(projectPath: string, role: string, projectName: string, taskId: string, taskTitle: string): string {
+// Role-specific capabilities and focus areas for mission-aware prompts
+const ROLE_CAPABILITIES: Record<string, { focus: string; skills: string; collaboration: string }> = {
+  architect: {
+    focus: 'System design, architecture decisions, technical specifications, and project structure',
+    skills: 'Design patterns, API design, database schema, system decomposition, scalability planning',
+    collaboration: 'Create detailed technical specs and task breakdowns. Define interfaces between components. Review architectural decisions made by other agents.',
+  },
+  coder: {
+    focus: 'Primary implementation of features, core business logic, and backend systems',
+    skills: 'Full-stack development, algorithm implementation, API endpoints, database operations',
+    collaboration: 'Implement tasks from the board. Write clean, tested code. Create new tickets for bugs found. Coordinate with reviewer and tester.',
+  },
+  'coder-2': {
+    focus: 'Secondary implementation, frontend components, UI/UX, and parallel development tracks',
+    skills: 'Frontend development, component architecture, state management, responsive design',
+    collaboration: 'Work on parallel tasks to coder. Focus on frontend/UI if coder handles backend. Avoid file conflicts by checking locked files.',
+  },
+  reviewer: {
+    focus: 'Code review, quality assurance, best practices enforcement, and standards compliance',
+    skills: 'Code review, security review, performance analysis, refactoring recommendations',
+    collaboration: 'Review completed work from coders. Create tickets for issues found. Move tasks to DONE after verification. Ensure code meets project standards.',
+  },
+  tester: {
+    focus: 'Testing strategy, test implementation, validation, and quality gates',
+    skills: 'Unit testing, integration testing, E2E testing, test coverage analysis, regression testing',
+    collaboration: 'Write and run tests for completed features. Create bug tickets for failures. Validate that tasks meet acceptance criteria before marking TESTED.',
+  },
+  'security-auditor': {
+    focus: 'Security analysis, vulnerability detection, and security hardening',
+    skills: 'OWASP top 10, dependency auditing, auth/authz review, input validation, secure coding',
+    collaboration: 'Audit code for security vulnerabilities. Create P0/P1 tickets for critical issues. Review auth flows and data handling.',
+  },
+  devops: {
+    focus: 'Infrastructure, CI/CD, deployment, monitoring, and operational excellence',
+    skills: 'Docker, CI/CD pipelines, monitoring setup, deployment automation, environment management',
+    collaboration: 'Set up build and deploy pipelines. Configure environments. Create tickets for infrastructure needs.',
+  },
+  coordinator: {
+    focus: 'Team orchestration, task assignment, and workflow optimization',
+    skills: 'Task prioritization, resource allocation, bottleneck identification, workflow management',
+    collaboration: 'Monitor team progress. Reassign tasks when agents are blocked. Optimize parallel work streams.',
+  },
+};
+
+/**
+ * Generate a mission-aware system prompt for an agent role.
+ * Reads mission.json from the project's coordination directory and tailors
+ * the prompt to the agent's role, skills, and the mission context.
+ */
+function generateMissionAwarePrompt(
+  projectPath: string,
+  projectName: string,
+  role: string,
+  projectId: string,
+): string {
+  // Read mission if available
+  let missionGoal = '';
+  let missionTechStack = '';
+  let missionDeliverables: string[] = [];
+  try {
+    const missionPath = path.join(projectPath, '.claude', 'coordination', 'mission.json');
+    if (fs.existsSync(missionPath)) {
+      const mission = JSON.parse(fs.readFileSync(missionPath, 'utf-8'));
+      missionGoal = mission.goal || '';
+      missionTechStack = mission.techStack || '';
+      missionDeliverables = mission.deliverables || [];
+    }
+  } catch { /* no mission */ }
+
+  const cap = ROLE_CAPABILITIES[role];
+  const dashboardPort = process.env.PORT || '4000';
+  const dashboardUrl = `http://localhost:${dashboardPort}`;
+
+  // Build the prompt
+  const parts: string[] = [];
+  parts.push(`You are the ${role} agent for the "${projectName}" project.`);
+
+  if (missionGoal) {
+    parts.push(`\n== MISSION ==\n${missionGoal}`);
+  }
+  if (missionTechStack) {
+    parts.push(`\nTech Stack: ${missionTechStack}`);
+  }
+  if (missionDeliverables.length > 0) {
+    parts.push(`\nKey Deliverables:\n${missionDeliverables.map(d => `- ${d}`).join('\n')}`);
+  }
+
+  if (cap) {
+    parts.push(`\n== YOUR ROLE ==\nFocus: ${cap.focus}\nSkills: ${cap.skills}\n\n== COLLABORATION ==\n${cap.collaboration}`);
+  }
+
+  parts.push(`\n== WORKFLOW ==
+1. Read .claude/coordination/TASKS.md for your task assignments
+2. Update task status as you progress (modify TASKS.md status field)
+3. Write to .claude/coordination/progress.txt to log progress
+4. Check .claude/coordination/registry.json for other active agents
+5. Create new tickets in TASKS.md for bugs or sub-tasks you discover
+6. Coordinate with other agents — check their status before modifying shared files`);
+
+  parts.push(`\n== DASHBOARD API ==
+Check board: curl -s '${dashboardUrl}/api/agent-actions?action=board-summary&projectId=${sanitizeForShell(projectId)}'
+Move task: curl -s -X POST ${dashboardUrl}/api/agent-actions -H 'Content-Type: application/json' -d '{"action":"move-task","projectId":"${sanitizeForShell(projectId)}","taskId":"TASK_ID","status":"DONE"}'
+Send message: curl -s -X POST ${dashboardUrl}/api/agent-actions -H 'Content-Type: application/json' -d '{"action":"send-message","projectId":"${sanitizeForShell(projectId)}","fromAgent":"${role}","toAgent":"AGENT","content":"MSG"}'`);
+
+  const prompt = parts.join('\n');
+
+  // Log prompt to DB
+  try {
+    const rawDb = (db as unknown as { $client: InstanceType<typeof import('better-sqlite3')> }).$client;
+    if (rawDb) {
+      rawDb.prepare(`
+        INSERT OR REPLACE INTO agent_system_prompts (id, project_id, agent_role, prompt, mission_goal, generated_by, created_at)
+        VALUES (?, ?, ?, ?, ?, 'rataa', ?)
+      `).run(
+        `prompt-${projectId}-${role}-${Date.now()}`,
+        projectId,
+        role,
+        prompt,
+        missionGoal || null,
+        new Date().toISOString(),
+      );
+    }
+  } catch { /* non-fatal — prompt logging should never block launch */ }
+
+  return prompt;
+}
+
+/**
+ * Generate a shell-escaped SYSTEM_PROMPT variable line for agent scripts.
+ * Priority: 1) .claude/agents/<role>.md template, 2) mission-aware generated prompt
+ */
+function getSystemPromptLine(projectPath: string, projectName: string, role: string, projectId: string): string {
+  const agentMdPath = path.join(projectPath, '.claude', 'agents', `${role}.md`);
+  if (fs.existsSync(agentMdPath)) {
+    // Still log the template-based prompt
+    try {
+      const templateContent = fs.readFileSync(agentMdPath, 'utf-8');
+      const rawDb = (db as unknown as { $client: InstanceType<typeof import('better-sqlite3')> }).$client;
+      if (rawDb) {
+        rawDb.prepare(`
+          INSERT OR REPLACE INTO agent_system_prompts (id, project_id, agent_role, prompt, mission_goal, generated_by, created_at)
+          VALUES (?, ?, ?, ?, ?, 'template', ?)
+        `).run(
+          `prompt-${projectId}-${role}-${Date.now()}`,
+          projectId,
+          role,
+          templateContent.slice(0, 5000),
+          null,
+          new Date().toISOString(),
+        );
+      }
+    } catch { /* non-fatal */ }
+    return `SYSTEM_PROMPT="$(cat .claude/agents/${role}.md)"`;
+  }
+
+  // Generate mission-aware prompt
+  const prompt = generateMissionAwarePrompt(projectPath, projectName, role, projectId);
+  // Escape for shell embedding in double quotes
+  const escaped = prompt.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\$/g, '\\$').replace(/`/g, '\\`');
+  return `SYSTEM_PROMPT="${escaped}"`;
+}
+
+function generateTaskRunnerScript(projectPath: string, role: string, projectName: string, taskId: string, taskTitle: string, projectId?: string): string {
   const scriptsDir = path.join(projectPath, 'scripts');
   if (!fs.existsSync(scriptsDir)) {
     fs.mkdirSync(scriptsDir, { recursive: true });
@@ -30,12 +195,14 @@ function generateTaskRunnerScript(projectPath: string, role: string, projectName
   // Task-specific script — always regenerated
   const scriptPath = path.join(scriptsDir, `run-${role}-relay.sh`);
 
-  const agentMdPath = path.join(projectPath, '.claude', 'agents', `${role}.md`);
-  const hasAgentTemplate = fs.existsSync(agentMdPath);
-
-  const systemPromptLine = hasAgentTemplate
-    ? `SYSTEM_PROMPT="$(cat .claude/agents/${role}.md)"`
-    : `SYSTEM_PROMPT="You are the ${role} agent for the ${projectName} project. Work from the coordination directory at .claude/coordination/ to pick up tasks, update status, and coordinate with other agents. Check TASKS.md for your assignments."`;
+  const systemPromptLine = projectId
+    ? getSystemPromptLine(projectPath, projectName, role, projectId)
+    : (() => {
+        const agentMdPath = path.join(projectPath, '.claude', 'agents', `${role}.md`);
+        return fs.existsSync(agentMdPath)
+          ? `SYSTEM_PROMPT="$(cat .claude/agents/${role}.md)"`
+          : `SYSTEM_PROMPT="You are the ${role} agent for the ${projectName} project. Work from the coordination directory at .claude/coordination/ to pick up tasks, update status, and coordinate with other agents. Check TASKS.md for your assignments."`;
+      })();
 
   const script = `#!/usr/bin/env bash
 # Auto-relay runner script for ${role} agent — task ${taskId}
@@ -78,7 +245,7 @@ exec claude \\
   return scriptPath;
 }
 
-function generateRunnerScript(projectPath: string, role: string, projectName: string): string {
+function generateRunnerScript(projectPath: string, role: string, projectName: string, projectId?: string): string {
   const scriptsDir = path.join(projectPath, 'scripts');
   if (!fs.existsSync(scriptsDir)) {
     fs.mkdirSync(scriptsDir, { recursive: true });
@@ -87,13 +254,14 @@ function generateRunnerScript(projectPath: string, role: string, projectName: st
   const scriptPath = path.join(scriptsDir, `run-${role}.sh`);
   if (fs.existsSync(scriptPath)) return scriptPath;
 
-  // Check if there's an agent template in .claude/agents/<role>.md
-  const agentMdPath = path.join(projectPath, '.claude', 'agents', `${role}.md`);
-  const hasAgentTemplate = fs.existsSync(agentMdPath);
-
-  const systemPromptLine = hasAgentTemplate
-    ? `SYSTEM_PROMPT="$(cat .claude/agents/${role}.md)"`
-    : `SYSTEM_PROMPT="You are the ${role} agent for the ${projectName} project. Work from the coordination directory at .claude/coordination/ to pick up tasks, update status, and coordinate with other agents. Check TASKS.md for your assignments."`;
+  const systemPromptLine = projectId
+    ? getSystemPromptLine(projectPath, projectName, role, projectId)
+    : (() => {
+        const agentMdPath = path.join(projectPath, '.claude', 'agents', `${role}.md`);
+        return fs.existsSync(agentMdPath)
+          ? `SYSTEM_PROMPT="$(cat .claude/agents/${role}.md)"`
+          : `SYSTEM_PROMPT="You are the ${role} agent for the ${projectName} project. Work from the coordination directory at .claude/coordination/ to pick up tasks, update status, and coordinate with other agents. Check TASKS.md for your assignments."`;
+      })();
 
   const script = `#!/usr/bin/env bash
 # Auto-generated runner script for ${role} agent
@@ -136,16 +304,18 @@ exec claude \\
   return scriptPath;
 }
 
-function generateSupervisorScript(projectPath: string, projectName: string, projectId: string): string {
+function generateSupervisorScript(projectPath: string, projectName: string, projectId: string, variant: string = 'supervisor'): string {
   const scriptsDir = path.join(projectPath, 'scripts');
   if (!fs.existsSync(scriptsDir)) {
     fs.mkdirSync(scriptsDir, { recursive: true });
   }
 
-  const scriptPath = path.join(scriptsDir, 'run-supervisor.sh');
+  const scriptPath = path.join(scriptsDir, `run-${variant}.sh`);
+  const isQuality = variant === 'supervisor-2';
+  const rataaLabel = isQuality ? 'Rataa-2 (Quality)' : 'Rataa-1 (Ops)';
 
   // Check if there's a custom agent template
-  const agentMdPath = path.join(projectPath, '.claude', 'agents', 'supervisor.md');
+  const agentMdPath = path.join(projectPath, '.claude', 'agents', `${variant}.md`);
   const hasAgentTemplate = fs.existsSync(agentMdPath);
 
   const pid = sanitizeForShell(projectId);
@@ -153,15 +323,8 @@ function generateSupervisorScript(projectPath: string, projectName: string, proj
   // Detect dashboard port from environment or Next.js config
   const dashboardPort = process.env.PORT || '4000';
   const dashboardUrl = `http://localhost:${dashboardPort}`;
-  const systemPromptLine = hasAgentTemplate
-    ? `SYSTEM_PROMPT="$(cat .claude/agents/supervisor.md)"`
-    : `SYSTEM_PROMPT="You are Raata, autonomous supervisor for ${pname}. You DO NOT ask permission. You DO NOT report findings. You EXECUTE actions immediately using the bash curl commands below. NEVER say 'shall I' or 'should I' — just DO IT.
-
-PROJECT_ID: ${pid}
-DASHBOARD: ${dashboardUrl}
-
-== COMMANDS (execute via Bash tool with curl) ==
-
+  // Shared commands for both supervisors
+  const sharedCommands = `
 CHECK AGENTS:
   curl -s ${dashboardUrl}/api/agent-actions?action=list-agents\\&projectId=${pid}
 
@@ -174,31 +337,86 @@ READ MISSION:
 LIST PENDING TASKS:
   curl -s ${dashboardUrl}/api/agent-actions?action=list-tasks\\&projectId=${pid}\\&status=TODO
 
+MOVE TASK STATUS (use DONE, IN_PROGRESS, TODO):
+  curl -s -X POST ${dashboardUrl}/api/agent-actions -H 'Content-Type: application/json' -d '{\\\"action\\\":\\\"move-task\\\",\\\"projectId\\\":\\\"${pid}\\\",\\\"taskId\\\":\\\"TASK_ID\\\",\\\"status\\\":\\\"DONE\\\"}'
+
+SEND MESSAGE TO AGENT:
+  curl -s -X POST ${dashboardUrl}/api/agent-actions -H 'Content-Type: application/json' -d '{\\\"action\\\":\\\"send-message\\\",\\\"projectId\\\":\\\"${pid}\\\",\\\"fromAgent\\\":\\\"${variant}\\\",\\\"toAgent\\\":\\\"AGENT_ID\\\",\\\"content\\\":\\\"MESSAGE\\\"}'
+
+LIST TMUX SESSIONS:
+  curl -s '${dashboardUrl}/api/tmux?action=list'
+
+KILL AGENT TMUX SESSION:
+  curl -s -X POST ${dashboardUrl}/api/tmux -H 'Content-Type: application/json' -d '{\\\"action\\\":\\\"kill\\\",\\\"session\\\":\\\"SESSION_NAME\\\"}'`;
+
+  // Ops-specific commands (Rataa-1)
+  const opsCommands = `
 SPAWN AGENTS (replace ROLE and TASK fields):
   curl -s -X POST ${dashboardUrl}/api/agents/launch -H 'Content-Type: application/json' -d '{\\\"projectId\\\":\\\"${pid}\\\",\\\"agents\\\":[\\\"ROLE\\\"],\\\"task\\\":{\\\"id\\\":\\\"TASK_ID\\\",\\\"title\\\":\\\"TASK_TITLE\\\"}}'
 
 SPAWN ALL IDLE AGENTS AT ONCE:
   curl -s -X POST ${dashboardUrl}/api/agents/launch -H 'Content-Type: application/json' -d '{\\\"projectId\\\":\\\"${pid}\\\",\\\"agents\\\":[\\\"coder\\\",\\\"coder-2\\\",\\\"reviewer\\\",\\\"tester\\\",\\\"architect\\\",\\\"security-auditor\\\",\\\"devops\\\"]}'
 
-MOVE TASK STATUS (use DONE, IN_PROGRESS, TODO):
-  curl -s -X POST ${dashboardUrl}/api/agent-actions -H 'Content-Type: application/json' -d '{\\\"action\\\":\\\"move-task\\\",\\\"projectId\\\":\\\"${pid}\\\",\\\"taskId\\\":\\\"TASK_ID\\\",\\\"status\\\":\\\"DONE\\\"}'
-
-SEND MESSAGE TO AGENT:
-  curl -s -X POST ${dashboardUrl}/api/agent-actions -H 'Content-Type: application/json' -d '{\\\"action\\\":\\\"send-message\\\",\\\"projectId\\\":\\\"${pid}\\\",\\\"fromAgent\\\":\\\"supervisor\\\",\\\"toAgent\\\":\\\"AGENT_ID\\\",\\\"content\\\":\\\"MESSAGE\\\"}'
-
 COMMIT AND PUSH:
-  curl -s -X POST ${dashboardUrl}/api/git -H 'Content-Type: application/json' -d '{\\\"projectId\\\":\\\"${pid}\\\",\\\"action\\\":\\\"commit-and-push\\\",\\\"message\\\":\\\"YOUR_MESSAGE\\\"}'
+  curl -s -X POST ${dashboardUrl}/api/git -H 'Content-Type: application/json' -d '{\\\"projectId\\\":\\\"${pid}\\\",\\\"action\\\":\\\"commit-and-push\\\",\\\"message\\\":\\\"YOUR_MESSAGE\\\"}'`;
 
-== MANDATORY ACTIONS EVERY CYCLE ==
+  // Quality-specific commands (Rataa-2)
+  const qualityCommands = `
+READ ANALYTICS:
+  curl -s '${dashboardUrl}/api/analytics?projectId=${pid}'
+
+GENERATE STANDUP (force regenerate):
+  curl -s -X POST ${dashboardUrl}/api/standup -H 'Content-Type: application/json' -d '{\\\"projectId\\\":\\\"${pid}\\\",\\\"force\\\":true}'
+
+GIT STATUS:
+  curl -s '${dashboardUrl}/api/git?projectId=${pid}'`;
+
+  const opsActions = `== MANDATORY ACTIONS EVERY CYCLE ==
 1. Check agents. For EVERY offline/completed agent, IMMEDIATELY spawn them with a pending task. Do not skip this.
-2. Check board. Move any tasks with verified acceptance criteria to DONE.
-3. If agents are working, send them encouraging messages.
-4. At 100% completion: run tests, commit and push, print summary.
-5. NEVER end a cycle without spawning all available agents on pending tasks."`;
+2. Kill tmux sessions for completed agents to save compute (check tmux list, kill idle ones).
+3. Check board. Move any tasks with verified acceptance criteria to DONE.
+4. If agents are working, send them encouraging messages with specific task guidance.
+5. NEVER end a cycle without spawning all available agents on pending tasks.
+6. At 100% completion: commit and push, print summary.
+7. You work WITH Rataa-2 (Quality). You handle spawning and killing. Rataa-2 handles quality and mission alignment.`;
+
+  const qualityActions = `== MANDATORY ACTIONS EVERY CYCLE ==
+1. Read mission. COMPARE mission goal vs current board progress — identify gaps.
+2. Check board for tasks that are DONE but not properly validated. Review their quality.
+3. If work does not align with mission deliverables, create new tasks or send messages to agents with corrections.
+4. Review analytics — check agent performance, identify bottlenecks or idle agents. Send findings to Rataa-1 via message.
+5. Generate standup report periodically to track progress.
+6. Verify code quality by reading key files agents have modified. Send review feedback as messages.
+7. At 100% completion: generate final standup, review all deliverables against mission, report gaps.
+8. You work WITH Rataa-1 (Ops). You handle quality and mission. Rataa-1 handles spawning and killing.`;
+
+  const roleDesc = isQuality
+    ? `You are Rataa-2 (Quality Supervisor) for ${pname}. Your job is mission alignment, quality review, analytics monitoring, and ensuring deliverables match the mission. You DO NOT spawn or kill agents — that is Rataa-1's job. You COMPARE mission vs work done, review code quality, and send feedback to agents and Rataa-1.`
+    : `You are Rataa-1 (Ops Supervisor) for ${pname}. Your job is agent lifecycle management: spawning, monitoring, killing tmux sessions, and ensuring all agents are working on tasks. You DO NOT review code quality — that is Rataa-2's job. You keep agents busy and the board moving.`;
+
+  const variantCommands = isQuality ? qualityCommands : opsCommands;
+  const variantActions = isQuality ? qualityActions : opsActions;
+
+  const systemPromptLine = hasAgentTemplate
+    ? `SYSTEM_PROMPT="$(cat .claude/agents/${variant}.md)"`
+    : `SYSTEM_PROMPT="${roleDesc} You DO NOT ask permission. You EXECUTE actions immediately using the bash curl commands below. NEVER say 'shall I' or 'should I' — just DO IT.
+
+PROJECT_ID: ${pid}
+DASHBOARD: ${dashboardUrl}
+
+== COMMANDS (execute via Bash tool with curl) ==
+${sharedCommands}
+${variantCommands}
+
+${variantActions}"`;
+
+  const executionPrompt = isQuality
+    ? `EXECUTE one quality review cycle NOW. Step 1: Read mission and compare with board status. Step 2: Review DONE tasks for quality. Step 3: Check analytics for bottlenecks. Step 4: Send feedback messages to agents. Step 5: Generate standup if needed. DO NOT ask permission. EXECUTE the curl commands.`
+    : `EXECUTE one ops supervision cycle NOW. Step 1: curl to check agents — spawn ALL offline/completed agents immediately with pending tasks. Step 2: Kill tmux sessions for completed agents. Step 3: Check board — move verified tasks to DONE. Step 4: Send messages to working agents. DO NOT ask permission. EXECUTE the curl commands.`;
 
   // Supervisor runs in a bash loop — each iteration is one supervision cycle
   const script = `#!/usr/bin/env bash
-# Supervisor (Raata) runner script — loops every 5 minutes
+# ${rataaLabel} runner script — loops every 60 seconds
 # Project: ${sanitizeForShell(projectName)}
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -223,18 +441,18 @@ try:
     with open(reg_path) as f: reg = json.load(f)
 except: reg = {'agents': []}
 if not isinstance(reg.get('agents'), list): reg['agents'] = []
-agents = [a for a in reg['agents'] if a.get('name') != 'supervisor']
-agents.append({'name': 'supervisor', 'role': 'supervisor', 'status': 'working', 'current_task': 'supervision', 'session_start': '\${NOW}', 'last_heartbeat': '\${NOW}'})
+agents = [a for a in reg['agents'] if a.get('name') != '${variant}']
+agents.append({'name': '${variant}', 'role': '${variant}', 'status': 'working', 'current_task': 'supervision', 'session_start': '\${NOW}', 'last_heartbeat': '\${NOW}'})
 reg['agents'] = agents
 with open(reg_path, 'w') as f: json.dump(reg, f, indent=2)
 " 2>/dev/null || true
   fi
 
-  echo "=== Supervision cycle at \$(date) ==="
+  echo "=== ${rataaLabel} cycle at \$(date) ==="
   claude \\
     --system-prompt "$SYSTEM_PROMPT" \\
     --allowedTools "Read,Bash,Grep,Glob" \\
-    -p "EXECUTE one supervision cycle NOW. Step 1: curl to check agents — spawn ALL offline/completed agents immediately with pending tasks. Step 2: curl to check board — move verified tasks to DONE. Step 3: send messages to working agents. Step 4: if 100% done, run tests and commit. DO NOT ask permission. DO NOT just report. EXECUTE the curl commands." \\
+    -p "${executionPrompt}" \\
     --max-turns 30 || true
 
   echo "Cycle complete. Next cycle in 60 seconds..."
@@ -250,8 +468,9 @@ done
 function registerLaunchedAgent(projectId: string, role: string, coordinationPath: string): void {
   const now = new Date().toISOString();
   const agentId = role; // Use role as agent ID (matches convention)
-  // Supervisor starts as 'working' immediately (it's a loop); others start as 'initializing'
-  const initialStatus = role === 'supervisor' ? 'working' : 'initializing';
+  // Supervisors start as 'working' immediately (they're loops); others start as 'initializing'
+  const isSupervisorRole = role === 'supervisor' || role === 'supervisor-2';
+  const initialStatus = isSupervisorRole ? 'working' : 'initializing';
 
   // 1. Ensure per-project tables exist
   if (!projectTablesExist(projectId)) {
@@ -264,7 +483,7 @@ function registerLaunchedAgent(projectId: string, role: string, coordinationPath
     agent_id: agentId,
     role,
     status: initialStatus,
-    current_task: role === 'supervisor' ? 'supervision' : null,
+    current_task: isSupervisorRole ? 'supervision' : null,
     model: 'claude-sonnet-4-6',
     session_start: now,
     last_heartbeat: now,
@@ -293,7 +512,7 @@ function registerLaunchedAgent(projectId: string, role: string, coordinationPath
       name: agentId,
       role,
       status: initialStatus,
-      current_task: role === 'supervisor' ? 'supervision' : '',
+      current_task: isSupervisorRole ? 'supervision' : '',
       session_start: now,
       last_heartbeat: now,
     };
@@ -316,7 +535,7 @@ function registerLaunchedAgent(projectId: string, role: string, coordinationPath
     id: `${projectId}-${agentId}`,
     role,
     status: initialStatus,
-    currentTask: role === 'supervisor' ? 'supervision' : null,
+    currentTask: isSupervisorRole ? 'supervision' : null,
     sessionStart: now,
     lastHeartbeat: now,
     lockedFiles: [],
@@ -450,7 +669,7 @@ export async function POST(req: NextRequest) {
         const sanitizedRole = sanitizeName(role);
         if (!sanitizedRole) continue;
         try {
-          generateRunnerScript(project.path, sanitizedRole, project.name);
+          generateRunnerScript(project.path, sanitizedRole, project.name, projectId as string);
           generated.push(sanitizedRole);
         } catch { /* skip */ }
       }
@@ -471,7 +690,7 @@ export async function POST(req: NextRequest) {
         for (const role of roles) {
           const sanitizedRole = sanitizeName(role);
           if (!sanitizedRole) continue;
-          generateRunnerScript(project.path, sanitizedRole, project.name);
+          generateRunnerScript(project.path, sanitizedRole, project.name, projectId as string);
           const sessionName = `${prefix}-${sanitizedRole}`;
           scriptLines.push(`echo "Launching ${sanitizedRole}..."`);
           scriptLines.push(`tmux new-session -d -s ${sessionName} -c "$(pwd)" "bash scripts/run-${sanitizedRole}.sh 2>&1 | tee /tmp/${sessionName}.log; echo '${sanitizedRole.toUpperCase()} DONE'; sleep 999999"`);
@@ -520,6 +739,13 @@ export async function POST(req: NextRequest) {
 
       const sessionName = `${prefix}-${sanitizedRole}`;
 
+      // Prevent duplicate concurrent launches
+      if (launchingLock.has(sessionName)) {
+        results.push({ role: sanitizedRole, status: 'already_launching', session: sessionName });
+        continue;
+      }
+      launchingLock.add(sessionName);
+
       // Check if already running — but allow relaunch if agent status is completed/offline
       if (activeSessions.includes(sessionName)) {
         // Check DB status — if completed or offline, kill the stale session and relaunch
@@ -552,7 +778,7 @@ export async function POST(req: NextRequest) {
       let scriptFile: string;
       if (taskInfo?.id) {
         try {
-          generateTaskRunnerScript(project.path, sanitizedRole, project.name, taskInfo.id, taskInfo.title);
+          generateTaskRunnerScript(project.path, sanitizedRole, project.name, taskInfo.id, taskInfo.title, projectId as string);
           scriptFile = `run-${sanitizedRole}-relay.sh`;
         } catch {
           scriptFile = `run-${sanitizedRole}.sh`;
@@ -561,13 +787,15 @@ export async function POST(req: NextRequest) {
         scriptFile = `run-${sanitizedRole}.sh`;
       }
 
-      // Supervisor gets a special looping script — always regenerate to pick up latest commands
-      if (sanitizedRole === 'supervisor' && !taskInfo?.id) {
+      // Supervisors get special looping scripts — always regenerate to pick up latest commands
+      const isSupervisor = sanitizedRole === 'supervisor' || sanitizedRole === 'supervisor-2';
+      if (isSupervisor && !taskInfo?.id) {
         try {
-          const oldScript = path.join(scriptsDir, 'run-supervisor.sh');
+          const scriptName = `run-${sanitizedRole}.sh`;
+          const oldScript = path.join(scriptsDir, scriptName);
           if (fs.existsSync(oldScript)) fs.unlinkSync(oldScript);
-          generateSupervisorScript(project.path, project.name, projectId as string);
-          scriptFile = 'run-supervisor.sh';
+          generateSupervisorScript(project.path, project.name, projectId as string, sanitizedRole);
+          scriptFile = scriptName;
         } catch { /* fall through to standard generation */ }
       }
 
@@ -575,7 +803,7 @@ export async function POST(req: NextRequest) {
       let scriptPath = path.join(scriptsDir, scriptFile);
       if (!fs.existsSync(scriptPath)) {
         try {
-          scriptPath = generateRunnerScript(project.path, sanitizedRole, project.name);
+          scriptPath = generateRunnerScript(project.path, sanitizedRole, project.name, projectId as string);
           scriptFile = `run-${sanitizedRole}.sh`;
         } catch (genErr) {
           results.push({ role: sanitizedRole, status: 'error', error: `Failed to generate script: ${genErr instanceof Error ? genErr.message : String(genErr)}` });
@@ -604,6 +832,8 @@ export async function POST(req: NextRequest) {
           status: 'error',
           error: err instanceof Error ? err.message : 'Launch failed',
         });
+      } finally {
+        launchingLock.delete(sessionName);
       }
     }
 
@@ -662,40 +892,49 @@ export async function launchAgentWithTask(
 
     const prefix = getProjectPrefix(project.name);
     const sessionName = `${prefix}-${sanitizedRole}`;
-    const activeSessions = getTmuxSessions();
 
-    // Kill existing completed/idle session if it exists
-    if (activeSessions.includes(sessionName)) {
-      try {
-        execFileSync('tmux', ['kill-session', '-t', sessionName], {
-          encoding: 'utf-8',
-          timeout: 5000,
-          stdio: ['pipe', 'pipe', 'pipe'],
-        });
-      } catch { /* session might already be gone */ }
+    // Prevent duplicate concurrent launches
+    if (launchingLock.has(sessionName)) return false;
+    launchingLock.add(sessionName);
+
+    try {
+      const activeSessions = getTmuxSessions();
+
+      // Kill existing completed/idle session if it exists
+      if (activeSessions.includes(sessionName)) {
+        try {
+          execFileSync('tmux', ['kill-session', '-t', sessionName], {
+            encoding: 'utf-8',
+            timeout: 5000,
+            stdio: ['pipe', 'pipe', 'pipe'],
+          });
+        } catch { /* session might already be gone */ }
+      }
+
+      // Generate task-specific relay script
+      generateTaskRunnerScript(project.path, sanitizedRole, project.name, taskId, taskTitle, projectId);
+
+      const scriptFile = `run-${sanitizedRole}-relay.sh`;
+      const shellCmd = `bash scripts/${scriptFile} 2>&1 | tee /tmp/${sessionName}.log; echo '${sanitizedRole.toUpperCase()} DONE'; sleep 999999`;
+
+      execFileSync('tmux', [
+        'new-session', '-d',
+        '-s', sessionName,
+        '-c', project.path,
+        shellCmd,
+      ], {
+        encoding: 'utf-8',
+        timeout: 10000,
+        env: { ...process.env, CLAUDECODE: undefined },
+      });
+
+      // Register agent in DB
+      registerLaunchedAgent(projectId, sanitizedRole, project.coordinationPath);
+
+      return true;
+    } finally {
+      launchingLock.delete(sessionName);
     }
-
-    // Generate task-specific relay script
-    generateTaskRunnerScript(project.path, sanitizedRole, project.name, taskId, taskTitle);
-
-    const scriptFile = `run-${sanitizedRole}-relay.sh`;
-    const shellCmd = `bash scripts/${scriptFile} 2>&1 | tee /tmp/${sessionName}.log; echo '${sanitizedRole.toUpperCase()} DONE'; sleep 999999`;
-
-    execFileSync('tmux', [
-      'new-session', '-d',
-      '-s', sessionName,
-      '-c', project.path,
-      shellCmd,
-    ], {
-      encoding: 'utf-8',
-      timeout: 10000,
-      env: { ...process.env, CLAUDECODE: undefined },
-    });
-
-    // Register agent in DB
-    registerLaunchedAgent(projectId, sanitizedRole, project.coordinationPath);
-
-    return true;
   } catch (err) {
     console.error('launchAgentWithTask error:', err);
     return false;

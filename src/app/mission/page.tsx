@@ -46,7 +46,8 @@ const AVAILABLE_ROLES = [
   { id: 'security', label: 'Security', desc: 'Security auditing' },
   { id: 'devops', label: 'DevOps', desc: 'Infrastructure & CI/CD' },
   { id: 'coordinator', label: 'Coordinator', desc: 'Team orchestration' },
-  { id: 'supervisor', label: 'Supervisor (Raata)', desc: 'Monitors progress & pushes agents' },
+  { id: 'supervisor', label: 'Rataa-1 (Ops)', desc: 'Agent lifecycle: spawn, monitor, kill' },
+  { id: 'supervisor-2', label: 'Rataa-2 (Quality)', desc: 'Mission alignment & quality review' },
 ];
 
 const POLL_INTERVAL = 5000;
@@ -89,6 +90,13 @@ export default function MissionPage() {
           setTechStack(data.mission.techStack || '');
           setDeliverables((data.mission.deliverables || []).join('\n'));
           setSelectedRoles(new Set(data.mission.agentTeam || []));
+        } else {
+          setMission(null);
+          setMissionExists(false);
+          setGoal('');
+          setTechStack('');
+          setDeliverables('');
+          setSelectedRoles(new Set());
         }
       })
       .catch(console.error);

@@ -73,9 +73,17 @@ function handleSSEMessage(e: MessageEvent) {
         useAnalyticsStore.getState().markStale();
         break;
       case 'mission:update':
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('mission-updated', { detail: msg.data }));
+        }
         break;
       case 'message:new':
-        if (msg.data) useMessageStore.getState().addMessage(msg.data);
+        if (msg.data) {
+          useMessageStore.getState().addMessage(msg.data);
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('message-new'));
+          }
+        }
         break;
       case 'notification:new':
         if (msg.data) useNotificationStore.getState().addNotification(msg.data);

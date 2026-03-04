@@ -35,6 +35,13 @@ export function CommunicationGraph({ projectId }: CommunicationGraphProps) {
     fetchConversations();
   }, [fetchConversations]);
 
+  // Re-fetch when new messages arrive via SSE
+  useEffect(() => {
+    const handler = () => fetchConversations();
+    window.addEventListener('message-new', handler);
+    return () => window.removeEventListener('message-new', handler);
+  }, [fetchConversations]);
+
   const { nodes, edges } = useMemo(() => {
     const agentSet = new Set<string>();
     const edgeMap = new Map<string, number>();

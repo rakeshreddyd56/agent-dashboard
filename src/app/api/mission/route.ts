@@ -80,6 +80,26 @@ export async function POST(req: NextRequest) {
   // Emit SSE event
   eventBus.broadcast('mission.updated', { mission }, projectId);
 
+  // Notify all working agents about mission update
+  try {
+    const { getProjectAgents, insertProjectEvent } = await import('@/lib/db/project-queries');
+    const agents = getProjectAgents(projectId);
+    const workingAgents = agents.filter((a: { status: string; role: string }) =>
+      ['working', 'planning', 'reviewing'].includes(a.status) && a.role !== 'supervisor'
+    );
+    for (const agent of workingAgents) {
+      insertProjectEvent(projectId, {
+        id: `evt-mission-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        timestamp: new Date().toISOString(),
+        level: 'warn',
+        agent_id: agent.agent_id,
+        agent_role: agent.role,
+        message: `MISSION UPDATED: ${mission.goal.slice(0, 100)}. Review mission.json for new priorities.`,
+        details: null,
+      });
+    }
+  } catch { /* non-fatal */ }
+
   return NextResponse.json({ mission, saved: true });
 }
 
@@ -128,6 +148,26 @@ export async function PUT(req: NextRequest) {
 
   fs.writeFileSync(missionPath, JSON.stringify(mission, null, 2), 'utf-8');
   eventBus.broadcast('mission.updated', { mission }, projectId);
+
+  // Notify all working agents about mission update
+  try {
+    const { getProjectAgents, insertProjectEvent } = await import('@/lib/db/project-queries');
+    const agents = getProjectAgents(projectId);
+    const workingAgents = agents.filter((a: { status: string; role: string }) =>
+      ['working', 'planning', 'reviewing'].includes(a.status) && a.role !== 'supervisor'
+    );
+    for (const agent of workingAgents) {
+      insertProjectEvent(projectId, {
+        id: `evt-mission-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        timestamp: new Date().toISOString(),
+        level: 'warn',
+        agent_id: agent.agent_id,
+        agent_role: agent.role,
+        message: `MISSION UPDATED: ${mission.goal.slice(0, 100)}. Review mission.json for new priorities.`,
+        details: null,
+      });
+    }
+  } catch { /* non-fatal */ }
 
   return NextResponse.json({ mission, saved: true });
 }

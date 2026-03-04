@@ -87,8 +87,9 @@ for (let r = 2; r <= 5; r++) {
   if (LAYOUT[p.y]) LAYOUT[p.y][p.x] = 4;
 });
 
-// Supervisor cubicle (Raata's office)
+// Supervisor cubicle (Rataa's office)
 const SUPERVISOR_DESK: Vec = { x: 17, y: 10 };
+const SUPERVISOR_2_DESK: Vec = { x: 16, y: 10 };
 if (LAYOUT[10]) { LAYOUT[10][16] = 4; LAYOUT[10][17] = 2; LAYOUT[10][18] = 4; }
 if (LAYOUT[11]) LAYOUT[11][17] = 3;
 
@@ -110,7 +111,7 @@ const FURNITURE: FurnitureItem[] = [
   { img: '/pixel-agents/furniture/electronics/SERVER.png', x: 16, y: 8, w: 16, h: 32 },
   { img: '/pixel-agents/furniture/electronics/SERVER.png', x: 17, y: 8, w: 16, h: 32 },
   { img: '/pixel-agents/furniture/electronics/PRINTER_DESKTOP.png', x: 18, y: 8, w: 16, h: 32 },
-  // Supervisor Raata's cubicle
+  // Supervisor Rataa's cubicle
   { img: '/pixel-agents/furniture/desks/DEFAULT_DESK.png', x: 17, y: 10, w: 32, h: 32 },
   { img: '/pixel-agents/furniture/electronics/MONITOR_CRT_ON.png', x: 16, y: 10, w: 16, h: 16 },
   { img: '/pixel-agents/furniture/chairs/CHAIR_ROTATING_FRONT.png', x: 17, y: 11, w: 16, h: 16 },
@@ -124,7 +125,7 @@ const FURNITURE: FurnitureItem[] = [
 const CHAR_MAP: Record<string, number> = {
   architect: 0, 'coder-1': 1, coder: 1, 'coder-2': 2,
   reviewer: 3, tester: 4, 'security-auditor': 5, security: 5,
-  devops: 0, coordinator: 3, supervisor: 5,
+  devops: 0, coordinator: 3, supervisor: 5, 'supervisor-2': 5,
   'ui-builder': 2, 'ui-polish': 4, 'ui-tester': 1,
 };
 
@@ -241,7 +242,7 @@ export function PixelOffice({ agents, compact, projectName }: PixelOfficeProps) 
     const existing = simsRef.current;
     const newSims: AgentSim[] = visible.map((agent, idx) => {
       const prev = existing.find(s => s.id === agent.agentId);
-      const desk = agent.role === 'supervisor' ? SUPERVISOR_DESK : DESK_TILES[idx % DESK_TILES.length];
+      const desk = agent.role === 'supervisor' ? SUPERVISOR_DESK : agent.role === 'supervisor-2' ? SUPERVISOR_2_DESK : DESK_TILES[idx % DESK_TILES.length];
       const chairTile = { x: desk.x, y: desk.y + 1 };
 
       if (prev) {
@@ -391,11 +392,11 @@ export function PixelOffice({ agents, compact, projectName }: PixelOfficeProps) 
         }
       }
 
-      // ── Raata label (drawn after furniture so desk doesn't cover it) ──
+      // ── Rataa label (drawn after furniture so desk doesn't cover it) ──
       ctx.fillStyle = '#9333ea';
       ctx.font = `bold ${Z * 2.5}px monospace`;
       ctx.textAlign = 'center';
-      ctx.fillText('Raata', 17 * T, 9.15 * T);
+      ctx.fillText('Rataa', 17 * T, 9.15 * T);
 
       // ── Update & draw agents ──
       const sims = simsRef.current;

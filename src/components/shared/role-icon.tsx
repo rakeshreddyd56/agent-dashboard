@@ -21,6 +21,7 @@ const iconMap: Record<AgentRole, React.ComponentType<{ className?: string }>> = 
   devops: Container,
   coordinator: Users,
   supervisor: Eye,
+  'supervisor-2': Eye,
 };
 
 const colorMap: Record<AgentRole, string> = {
@@ -33,6 +34,7 @@ const colorMap: Record<AgentRole, string> = {
   devops: 'text-[#f5b942]',
   coordinator: 'text-[#24556f]',
   supervisor: 'text-[#9333ea]',
+  'supervisor-2': 'text-[#7c3aed]',
 };
 
 export function RoleIcon({ role, className }: { role: AgentRole; className?: string }) {

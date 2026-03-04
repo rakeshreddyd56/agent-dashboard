@@ -11,6 +11,7 @@ import { TaskFlowMini } from '@/components/dashboard/task-flow-mini';
 import { NotificationPreview } from '@/components/dashboard/notification-preview';
 import { PixelOffice } from '@/components/pixel-agents/pixel-office';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { MissionPanel } from '@/components/dashboard/mission-panel';
 import { Bot, ListChecks, TrendingUp, DollarSign } from 'lucide-react';
 
 export default function DashboardPage() {
@@ -68,6 +69,8 @@ export default function DashboardPage() {
       </div>
 
       <TaskFlowMini tasks={tasks} />
+
+      <MissionPanel />
 
       <Card className="border-border/50 overflow-hidden">
         <CardHeader className="pb-2">

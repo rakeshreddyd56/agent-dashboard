@@ -32,7 +32,8 @@ export const AGENT_ROLES: { role: AgentRole; label: string; icon: string; color:
   { role: 'security-auditor', label: 'Security', icon: 'Shield', color: '#a4312f' },
   { role: 'devops', label: 'DevOps', icon: 'Container', color: '#8d5a0f' },
   { role: 'coordinator', label: 'Coordinator', icon: 'Users', color: '#24556f' },
-  { role: 'supervisor', label: 'Supervisor (Raata)', icon: 'Eye', color: '#9333ea' },
+  { role: 'supervisor', label: 'Rataa-1 (Ops)', icon: 'Eye', color: '#9333ea' },
+  { role: 'supervisor-2', label: 'Rataa-2 (Quality)', icon: 'Eye', color: '#7c3aed' },
 ];
 
 /* Agent status — mapped to Moltbook freshness/trust semantics
@@ -65,7 +66,7 @@ export const AUTO_RELAY_CONFIG = {
   intervalMs: 60_000,
   maxRelaysPerAgent: 10,
   cooldownMs: 30_000,
-  excludedRoles: ['coordinator', 'supervisor'] as string[],
+  excludedRoles: ['coordinator', 'supervisor', 'supervisor-2'] as string[],
 };
 
 export const HEARTBEAT_THRESHOLDS = {

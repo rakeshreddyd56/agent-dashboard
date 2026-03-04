@@ -258,6 +258,18 @@ function createDb() {
     );
     CREATE INDEX IF NOT EXISTS idx_runs_pipeline ON pipeline_runs(pipeline_id);
     CREATE INDEX IF NOT EXISTS idx_runs_project ON pipeline_runs(project_id);
+
+    CREATE TABLE IF NOT EXISTS agent_system_prompts (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id),
+      agent_role TEXT NOT NULL,
+      prompt TEXT NOT NULL,
+      mission_goal TEXT,
+      generated_by TEXT NOT NULL DEFAULT 'rataa',
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_prompts_project ON agent_system_prompts(project_id);
+    CREATE INDEX IF NOT EXISTS idx_prompts_role ON agent_system_prompts(agent_role);
   `);
 
   // Purge analytics snapshots older than 30 days

@@ -26,12 +26,13 @@ export default function AgentsPage() {
 
   const offlineCount = agents.filter((a) => a.status === 'offline' || a.status === 'completed').length;
   const activeCount = agents.filter((a) => ['working', 'planning', 'reviewing'].includes(a.status)).length;
-  const hasSupervisor = agents.some((a) => a.role === 'supervisor' && a.status === 'working');
+  const hasSupervisor = agents.some((a) => (a.role === 'supervisor' || a.role === 'supervisor-2') && a.status === 'working');
+  const supervisorCount = agents.filter((a) => (a.role === 'supervisor' || a.role === 'supervisor-2') && a.status === 'working').length;
 
   const handleLaunchAll = async () => {
     if (!activeProjectId || launching) return;
     const respawnRoles = agents
-      .filter((a) => (a.status === 'offline' || a.status === 'completed') && a.role !== 'supervisor')
+      .filter((a) => (a.status === 'offline' || a.status === 'completed') && a.role !== 'supervisor' && a.role !== 'supervisor-2')
       .map((a) => a.agentId);
     if (respawnRoles.length === 0) return;
 
@@ -81,7 +82,7 @@ export default function AgentsPage() {
     }
   };
 
-  const handleLaunchSupervisor = async () => {
+  const handleLaunchSupervisors = async () => {
     if (!activeProjectId || launching) return;
     setLaunching(true);
     setLaunchMsg(null);
@@ -89,11 +90,14 @@ export default function AgentsPage() {
       const res = await fetch('/api/agents/launch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId: activeProjectId, agents: ['supervisor'] }),
+        body: JSON.stringify({ projectId: activeProjectId, agents: ['supervisor', 'supervisor-2'] }),
       });
       const data = await res.json();
-      const st = data.results?.[0]?.status;
-      setLaunchMsg(st === 'launched' ? 'Raata launched' : st === 'already_running' ? 'Raata already running' : 'Launch failed');
+      const launched = (data.results || []).filter((r: { status: string }) => r.status === 'launched').length;
+      const running = (data.results || []).filter((r: { status: string }) => r.status === 'already_running').length;
+      if (launched > 0) setLaunchMsg(`${launched} Rataa${launched > 1 ? 's' : ''} launched`);
+      else if (running > 0) setLaunchMsg('Rataas already running');
+      else setLaunchMsg('Launch failed');
     } catch {
       setLaunchMsg('Launch failed');
     } finally {
@@ -111,16 +115,16 @@ export default function AgentsPage() {
             <Badge variant="secondary" className="text-[10px]">{activeCount} active</Badge>
             <Badge variant="outline" className="text-[10px]">{offlineCount} idle</Badge>
           </div>
-          {!hasSupervisor && (
+          {supervisorCount < 2 && (
             <Button
               variant="outline"
               size="sm"
               className="h-7 gap-1.5 text-xs text-[#9333ea] border-[#9333ea]/30 hover:bg-[#9333ea]/10"
-              onClick={handleLaunchSupervisor}
+              onClick={handleLaunchSupervisors}
               disabled={launching}
             >
               <Eye className="h-3.5 w-3.5" />
-              Launch Raata
+              {supervisorCount === 0 ? 'Launch Rataas' : 'Launch Rataa-2'}
             </Button>
           )}
           {offlineCount > 0 && (
@@ -140,7 +144,7 @@ export default function AgentsPage() {
             </Button>
           )}
           {launchMsg && (
-            <span className={`text-xs ${launchMsg.includes('launched') || launchMsg.includes('Raata') ? 'text-[#3dba8a]' : 'text-[#e05252]'}`}>
+            <span className={`text-xs ${launchMsg.includes('launched') || launchMsg.includes('Rataa') ? 'text-[#3dba8a]' : 'text-[#e05252]'}`}>
               {launchMsg}
             </span>
           )}

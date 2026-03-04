@@ -40,7 +40,9 @@ export async function POST(req: NextRequest) {
     } catch {
       return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
     }
-    const { projectId, date: requestDate } = body as Record<string, string | undefined>;
+    const projectId = body.projectId as string | undefined;
+    const requestDate = body.date as string | undefined;
+    const forceRegen = !!body.force;
 
     if (!projectId) {
       return NextResponse.json({ error: 'projectId required' }, { status: 400 });
@@ -54,11 +56,18 @@ export async function POST(req: NextRequest) {
 
   // Check if already generated
   const existing = db.select().from(schema.standupReports)
-    .where(and(eq(schema.standupReports.projectId, projectId), eq(schema.standupReports.date, date)))
+    .where(and(eq(schema.standupReports.projectId, projectId as string), eq(schema.standupReports.date, date)))
     .get();
 
-  if (existing) {
+  if (existing && !forceRegen) {
     return NextResponse.json({ report: { ...existing, report: JSON.parse(existing.report) }, cached: true });
+  }
+
+  // Force regeneration — delete existing cached report
+  if (existing && forceRegen) {
+    db.delete(schema.standupReports)
+      .where(and(eq(schema.standupReports.projectId, projectId as string), eq(schema.standupReports.date, date)))
+      .run();
   }
 
   // Gather data for report

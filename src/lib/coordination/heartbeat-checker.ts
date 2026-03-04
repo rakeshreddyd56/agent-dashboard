@@ -120,6 +120,18 @@ export function checkStaleAgents(projectId: string): void {
     // Skip already-terminal agents
     if (agent.status === 'offline' || agent.status === 'completed') continue;
 
+    // Supervisors (Rataa) run in a loop — always refresh heartbeat, never mark completed
+    if (agent.role === 'supervisor' || agent.role === 'supervisor-2') {
+      const hbTime = agent.last_heartbeat ? new Date(agent.last_heartbeat).getTime() : 0;
+      const isStale = !isNaN(hbTime) && hbTime > 0 && (now - hbTime > HEARTBEAT_THRESHOLDS.warning);
+      if (isStale) {
+        const refreshedAgent: AgentRow = { ...agent, last_heartbeat: nowIso };
+        upsertProjectAgent(projectId, refreshedAgent);
+        changed = true;
+      }
+      continue;
+    }
+
     const hbTime = agent.last_heartbeat ? new Date(agent.last_heartbeat).getTime() : 0;
     const isStale = !isNaN(hbTime) && hbTime > 0 && (now - hbTime > HEARTBEAT_THRESHOLDS.warning);
 
@@ -151,6 +163,16 @@ export function checkStaleAgents(projectId: string): void {
     };
     upsertProjectAgent(projectId, updatedAgent);
     changed = true;
+
+    // Kill the stale tmux session to free compute
+    if (sessionAlive) {
+      try {
+        execFileSync('tmux', ['kill-session', '-t', sessionName], {
+          encoding: 'utf-8', timeout: 5000,
+          stdio: ['pipe', 'pipe', 'pipe'],
+        });
+      } catch { /* session may already be gone */ }
+    }
 
     // Mark the agent's current task as DONE if it was IN_PROGRESS
     if (agent.current_task) {
@@ -212,6 +234,7 @@ export function checkStaleAgents(projectId: string): void {
       createdAt: a.created_at,
     }));
     eventBus.broadcast('agent.synced', { agents: mapped }, projectId);
+    eventBus.broadcast('analytics.updated', { projectId }, projectId);
 
     // Proactively trigger sync + auto-relay when agents complete
     // Sync first to pick up TASKS.md changes the agents wrote, then relay

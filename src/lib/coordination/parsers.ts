@@ -38,7 +38,7 @@ function generateId(): string {
 
 const VALID_ROLES: Set<string> = new Set([
   'architect', 'coder', 'coder-2', 'reviewer', 'tester',
-  'security-auditor', 'devops', 'coordinator', 'supervisor',
+  'security-auditor', 'devops', 'coordinator', 'supervisor', 'supervisor-2',
 ]);
 
 const VALID_STATUSES: Set<string> = new Set([

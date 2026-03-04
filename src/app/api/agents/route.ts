@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getProjectAgents } from '@/lib/db/project-queries';
 import { projectTablesExist, createProjectTables } from '@/lib/db/dynamic-tables';
+import { db, schema } from '@/lib/db';
+import { eq, desc } from 'drizzle-orm';
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const projectId = searchParams.get('projectId');
+  const include = searchParams.get('include');
 
   if (!projectId) {
     return NextResponse.json({ error: 'projectId required' }, { status: 400 });
@@ -14,9 +17,19 @@ export async function GET(req: NextRequest) {
     createProjectTables(projectId);
   }
 
-  // Heartbeat staleness is handled by heartbeat-checker.ts (via file-watcher
-  // every 60s and scheduler every 5min) which probes tmux sessions.
-  // No need to check on every GET — it causes false positives and is slow.
+  // Return system prompts if requested
+  if (include === 'prompts') {
+    try {
+      const prompts = db.select().from(schema.agentSystemPrompts)
+        .where(eq(schema.agentSystemPrompts.projectId, projectId))
+        .orderBy(desc(schema.agentSystemPrompts.createdAt))
+        .limit(50)
+        .all();
+      return NextResponse.json({ prompts });
+    } catch {
+      return NextResponse.json({ prompts: [] });
+    }
+  }
 
   const agents = getProjectAgents(projectId).map((a) => ({
     id: a.id,
