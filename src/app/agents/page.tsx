@@ -13,6 +13,9 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ErrorBoundary } from '@/components/shared/error-boundary';
 import { SkeletonAgentGrid } from '@/components/shared/skeletons';
+import { FloorSelector } from '@/components/shared/floor-selector';
+import { useOfficeStore } from '@/lib/store/office-store';
+import { filterAgentsByFloor } from '@/lib/utils/floor-filter';
 import { Rocket, RotateCcw, Eye } from 'lucide-react';
 
 export default function AgentsPage() {
@@ -20,7 +23,9 @@ export default function AgentsPage() {
   const events = useEventStore((s) => s.events);
   const activeProjectId = useProjectStore((s) => s.activeProjectId);
   const projectName = useProjectStore((s) => s.projects.find((p) => p.id === s.activeProjectId)?.name || 'Agent Dashboard');
-  const agents = activeProjectId ? allAgents.filter((a) => a.projectId === activeProjectId) : allAgents;
+  const viewFloor = useOfficeStore((s) => s.viewFloor);
+  const projectAgents = activeProjectId ? allAgents.filter((a) => a.projectId === activeProjectId) : allAgents;
+  const agents = filterAgentsByFloor(projectAgents, viewFloor);
   const [launching, setLaunching] = useState(false);
   const [launchMsg, setLaunchMsg] = useState<string | null>(null);
 
@@ -108,9 +113,10 @@ export default function AgentsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <h1 className="text-2xl font-bold">{projectName} Agents</h1>
         <div className="flex items-center gap-3">
+          <FloorSelector />
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <Badge variant="secondary" className="text-[10px]">{activeCount} active</Badge>
             <Badge variant="outline" className="text-[10px]">{offlineCount} idle</Badge>
@@ -164,7 +170,7 @@ export default function AgentsPage() {
         </CardHeader>
         <CardContent className="flex justify-center py-4 overflow-x-auto">
           <div className="max-w-full">
-            <PixelOffice agents={agents} projectName={projectName} />
+            <PixelOffice agents={agents} projectName={projectName} floorId={viewFloor} />
           </div>
         </CardContent>
       </Card>

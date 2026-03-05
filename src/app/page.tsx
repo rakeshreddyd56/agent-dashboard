@@ -14,6 +14,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { MissionPanel } from '@/components/dashboard/mission-panel';
 import { Bot, ListChecks, TrendingUp, DollarSign, Building2 } from 'lucide-react';
 import { useOfficeStore } from '@/lib/store/office-store';
+import { FloorSelector } from '@/components/shared/floor-selector';
+import { filterAgentsByFloor, filterTasksByFloor } from '@/lib/utils/floor-filter';
 import Link from 'next/link';
 
 function OfficeStatusCard() {
@@ -59,10 +61,15 @@ export default function DashboardPage() {
   const allAgents = useAgentStore((s) => s.agents);
   const activeProjectId = useProjectStore((s) => s.activeProjectId);
   const projectName = useProjectStore((s) => s.projects.find((p) => p.id === s.activeProjectId)?.name || 'Agent Dashboard');
+  const viewFloor = useOfficeStore((s) => s.viewFloor);
 
   // Filter by active project
-  const tasks = activeProjectId ? allTasks.filter((t) => t.projectId === activeProjectId) : allTasks;
-  const agents = activeProjectId ? allAgents.filter((a) => a.projectId === activeProjectId) : allAgents;
+  const projectTasks = activeProjectId ? allTasks.filter((t) => t.projectId === activeProjectId) : allTasks;
+  const projectAgents = activeProjectId ? allAgents.filter((a) => a.projectId === activeProjectId) : allAgents;
+
+  // Filter by floor
+  const agents = filterAgentsByFloor(projectAgents, viewFloor);
+  const tasks = filterTasksByFloor(projectTasks, viewFloor);
 
   const activeAgents = agents.filter((a) =>
     ['working', 'planning', 'reviewing'].includes(a.status)
@@ -73,9 +80,20 @@ export default function DashboardPage() {
   const rate = total > 0 ? Math.round((completed / total) * 100) : 0;
   const cost = agents.reduce((sum, a) => sum + (a.estimatedCost || 0), 0);
 
+  const floorTitles: Record<string, string> = {
+    all: `${projectName} HQ`,
+    '1': 'Research Lab HQ',
+    '2': 'Dev Floor HQ',
+    '3': 'Ops Center HQ',
+  };
+  const pageTitle = floorTitles[String(viewFloor)] || `${projectName} HQ`;
+
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold">{projectName} HQ</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">{pageTitle}</h1>
+        <FloorSelector />
+      </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
@@ -120,7 +138,7 @@ export default function DashboardPage() {
           </CardTitle>
         </CardHeader>
         <CardContent className="flex justify-center py-3">
-          <PixelOffice agents={agents} projectName={projectName} />
+          <PixelOffice agents={agents} projectName={projectName} floorId={viewFloor} />
         </CardContent>
       </Card>
 

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useMemo, useState } from 'react';
 import type { AgentSnapshot } from '@/lib/types';
+import { FLOOR_CONFIGS, type FloorConfig } from '@/lib/pixel-floors';
 
 /* ───────── constants ───────── */
 const S = 16;            // sprite tile size
@@ -19,20 +20,19 @@ interface AgentSim {
   id: string;
   agent: AgentSnapshot;
   charIdx: number;
-  pos: Vec;             // current pixel position
-  target: Vec;          // target tile
-  dest: Vec;            // final destination tile
-  path: Vec[];          // BFS path
+  pos: Vec;
+  target: Vec;
+  dest: Vec;
+  path: Vec[];
   state: 'sit' | 'walk' | 'idle' | 'break' | 'think';
-  dir: number;          // 0=down,1=left,2=up,3=right
+  dir: number;
   frame: number;
-  stateTimer: number;   // ticks until state change
-  deskTile: Vec;        // assigned desk
-  // Pixel sync additions
-  celebrationTimer: number;   // countdown for sparkle effect (0 = inactive)
-  exclamationTimer: number;   // countdown for blocked "!" indicator
-  lastKnownStatus: string;    // tracks status changes for reactions
-  taskLabel: string;           // truncated currentTask text
+  stateTimer: number;
+  deskTile: Vec;
+  celebrationTimer: number;
+  exclamationTimer: number;
+  lastKnownStatus: string;
+  taskLabel: string;
 }
 
 function truncateTask(task: string, maxLen = 18): string {
@@ -43,35 +43,28 @@ function truncateTask(task: string, maxLen = 18): string {
 interface FurnitureItem {
   img: string;
   x: number; y: number;
-  w: number; h: number;  // in source pixels
+  w: number; h: number;
 }
 
-/* ───────── office layout ───────── */
-// 0=floor, 1=wall, 2=desk, 3=chair, 4=furniture(walkable-over: no), 5=break-area
+/* ───────── default "all floors" layout ───────── */
 const LAYOUT: number[][] = [];
 for (let r = 0; r < ROWS; r++) {
   const row: number[] = [];
   for (let c = 0; c < COLS; c++) {
-    if (r === 0 || r === ROWS - 1 || c === 0 || c === COLS - 1) row.push(1); // walls
+    if (r === 0 || r === ROWS - 1 || c === 0 || c === COLS - 1) row.push(1);
     else row.push(0);
   }
   LAYOUT.push(row);
 }
 
-// Work area desks (left section) — 2 rows of 4 desks
 const DESK_TILES: Vec[] = [
   { x: 3, y: 3 }, { x: 6, y: 3 }, { x: 9, y: 3 }, { x: 12, y: 3 },
   { x: 3, y: 7 }, { x: 6, y: 7 }, { x: 9, y: 7 }, { x: 12, y: 7 },
   { x: 3, y: 11 }, { x: 6, y: 11 }, { x: 9, y: 11 }, { x: 12, y: 11 },
 ];
 DESK_TILES.forEach(d => { if (LAYOUT[d.y]) LAYOUT[d.y][d.x] = 2; });
+DESK_TILES.forEach(d => { if (LAYOUT[d.y + 1]) LAYOUT[d.y + 1][d.x] = 3; });
 
-// Chair tiles (below each desk)
-DESK_TILES.forEach(d => {
-  if (LAYOUT[d.y + 1]) LAYOUT[d.y + 1][d.x] = 3;
-});
-
-// Break area (right section)
 const BREAK_TILES: Vec[] = [];
 for (let r = 2; r <= 5; r++) {
   for (let c = 16; c <= 18; c++) {
@@ -82,44 +75,43 @@ for (let r = 2; r <= 5; r++) {
   }
 }
 
-// Server room area
 [{ x: 16, y: 8 }, { x: 17, y: 8 }, { x: 18, y: 8 }].forEach(p => {
   if (LAYOUT[p.y]) LAYOUT[p.y][p.x] = 4;
 });
 
-// Supervisor cubicle (Rataa's office)
 const SUPERVISOR_DESK: Vec = { x: 17, y: 10 };
 const SUPERVISOR_2_DESK: Vec = { x: 16, y: 10 };
 if (LAYOUT[10]) { LAYOUT[10][16] = 4; LAYOUT[10][17] = 2; LAYOUT[10][18] = 4; }
 if (LAYOUT[11]) LAYOUT[11][17] = 3;
 
-/* ───────── furniture defs ───────── */
+/* ───────── default furniture ───────── */
 const FURNITURE: FurnitureItem[] = [
-  // Desks
   ...DESK_TILES.map(d => ({ img: '/pixel-agents/furniture/desks/DEFAULT_DESK.png', x: d.x, y: d.y, w: 32, h: 32 })),
-  // Monitors on desks
   ...DESK_TILES.slice(0, 8).map(d => ({ img: '/pixel-agents/furniture/electronics/MONITOR_FRONT_ON.png', x: d.x, y: d.y, w: 16, h: 16 })),
   ...DESK_TILES.slice(8).map(d => ({ img: '/pixel-agents/furniture/electronics/LAPTOP_FRONT_ON.png', x: d.x, y: d.y, w: 16, h: 32 })),
-  // Chairs
   ...DESK_TILES.map(d => ({ img: '/pixel-agents/furniture/chairs/CHAIR_ROTATING_FRONT.png', x: d.x, y: d.y + 1, w: 16, h: 16 })),
-  // Break room
   { img: '/pixel-agents/furniture/misc/VENDING_MACHINE.png', x: 18, y: 2, w: 32, h: 32 },
   { img: '/pixel-agents/furniture/misc/COFFEE_MACHINE.png', x: 16, y: 2, w: 16, h: 32 },
   { img: '/pixel-agents/furniture/misc/WATER_COOLER.png', x: 16, y: 4, w: 16, h: 32 },
   { img: '/pixel-agents/furniture/desks/COFFEE_TABLE_LG.png', x: 17, y: 4, w: 32, h: 32 },
-  // Server room
   { img: '/pixel-agents/furniture/electronics/SERVER.png', x: 16, y: 8, w: 16, h: 32 },
   { img: '/pixel-agents/furniture/electronics/SERVER.png', x: 17, y: 8, w: 16, h: 32 },
   { img: '/pixel-agents/furniture/electronics/PRINTER_DESKTOP.png', x: 18, y: 8, w: 16, h: 32 },
-  // Supervisor Rataa's cubicle
   { img: '/pixel-agents/furniture/desks/DEFAULT_DESK.png', x: 17, y: 10, w: 32, h: 32 },
   { img: '/pixel-agents/furniture/electronics/MONITOR_CRT_ON.png', x: 16, y: 10, w: 16, h: 16 },
   { img: '/pixel-agents/furniture/chairs/CHAIR_ROTATING_FRONT.png', x: 17, y: 11, w: 16, h: 16 },
   { img: '/pixel-agents/furniture/misc/COFFEE_MUG.png', x: 18, y: 10, w: 16, h: 16 },
-  // Decor
   { img: '/pixel-agents/furniture/misc/BIN.png', x: 15, y: 12, w: 16, h: 16 },
   { img: '/pixel-agents/furniture/misc/BIN.png', x: 1, y: 12, w: 16, h: 16 },
 ];
+
+/* ───────── default colors ───────── */
+const DEFAULT_COLORS = {
+  floor1: '#2e2114', floor2: '#332618',
+  break1: '#3a2e20', break2: '#3e3122',
+  wallTop: '#3a2a1a', wallSide: '#3d2c18',
+  wallTrim: '#4a3828', accent: '#c8a87a',
+};
 
 /* ───────── character mapping ───────── */
 const CHAR_MAP: Record<string, number> = {
@@ -127,6 +119,11 @@ const CHAR_MAP: Record<string, number> = {
   reviewer: 3, tester: 4, 'security-auditor': 5, security: 5,
   devops: 0, coordinator: 3, supervisor: 5, 'supervisor-2': 5,
   'ui-builder': 2, 'ui-polish': 4, 'ui-tester': 1,
+  // One Piece crew
+  'rataa-research': 3, 'rataa-frontend': 2, 'rataa-backend': 0, 'rataa-ops': 1,
+  frontend: 4, 'backend-1': 0, 'backend-2': 5,
+  'tester-1': 3, 'tester-2': 4,
+  'researcher-1': 1, 'researcher-2': 2, 'researcher-3': 0, 'researcher-4': 5,
 };
 
 const STATUS_COLOR: Record<string, string> = {
@@ -135,22 +132,19 @@ const STATUS_COLOR: Record<string, string> = {
   completed: '#3dba8a', offline: '#476256',
 };
 
-/* ───────── BFS pathfinding ───────── */
-function isWalkable(x: number, y: number): boolean {
+/* ───────── BFS pathfinding (parameterized) ───────── */
+function isWalkableOn(layout: number[][], x: number, y: number): boolean {
   if (x < 0 || y < 0 || x >= COLS || y >= ROWS) return false;
-  const cell = LAYOUT[y][x];
-  return cell === 0 || cell === 3 || cell === 5; // floor, chair, or break area
+  const cell = layout[y][x];
+  return cell === 0 || cell === 3 || cell === 5;
 }
 
-function bfs(from: Vec, to: Vec): Vec[] {
+function bfsOn(layout: number[][], from: Vec, to: Vec): Vec[] {
   if (from.x === to.x && from.y === to.y) return [];
   const visited = new Set<string>();
   const queue: { pos: Vec; path: Vec[] }[] = [{ pos: from, path: [] }];
   visited.add(`${from.x},${from.y}`);
-
-  const dirs = [
-    { x: 0, y: 1 }, { x: 0, y: -1 }, { x: 1, y: 0 }, { x: -1, y: 0 },
-  ];
+  const dirs = [{ x: 0, y: 1 }, { x: 0, y: -1 }, { x: 1, y: 0 }, { x: -1, y: 0 }];
 
   while (queue.length > 0) {
     const cur = queue.shift()!;
@@ -159,41 +153,167 @@ function bfs(from: Vec, to: Vec): Vec[] {
       const ny = cur.pos.y + d.y;
       const key = `${nx},${ny}`;
       if (visited.has(key)) continue;
-      if (!isWalkable(nx, ny) && !(nx === to.x && ny === to.y)) continue;
+      if (!isWalkableOn(layout, nx, ny) && !(nx === to.x && ny === to.y)) continue;
       visited.add(key);
       const newPath = [...cur.path, { x: nx, y: ny }];
       if (nx === to.x && ny === to.y) return newPath;
       queue.push({ pos: { x: nx, y: ny }, path: newPath });
     }
   }
-  return []; // no path
+  return [];
+}
+
+/* ───────── canvas-drawn snacks ───────── */
+function drawCustomSnack(ctx: CanvasRenderingContext2D, type: string, x: number, y: number) {
+  const px = x * T;
+  const py = y * T;
+
+  switch (type) {
+    case 'fruit_bowl': {
+      // Brown oval bowl
+      ctx.fillStyle = '#8B6914';
+      ctx.beginPath();
+      ctx.ellipse(px + T / 2, py + T - 8, 16, 8, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // Fruits
+      ctx.fillStyle = '#e53e3e'; // red apple
+      ctx.beginPath(); ctx.arc(px + T / 2 - 6, py + T - 14, 5, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#48bb78'; // green apple
+      ctx.beginPath(); ctx.arc(px + T / 2 + 6, py + T - 14, 5, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#ecc94b'; // yellow
+      ctx.beginPath(); ctx.arc(px + T / 2, py + T - 18, 4, 0, Math.PI * 2); ctx.fill();
+      break;
+    }
+    case 'biscuit_box': {
+      // Tan rectangle box
+      ctx.fillStyle = '#d4a76a';
+      ctx.fillRect(px + 6, py + T - 16, 24, 12);
+      ctx.strokeStyle = '#b8894d';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(px + 6, py + T - 16, 24, 12);
+      // Small biscuit circles
+      ctx.fillStyle = '#c4955a';
+      for (let i = 0; i < 3; i++) {
+        ctx.beginPath();
+        ctx.arc(px + 14 + i * 6, py + T - 10, 3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      break;
+    }
+    case 'pizza_box': {
+      // Flat box
+      ctx.fillStyle = '#d4d4d4';
+      ctx.fillRect(px + 4, py + T - 14, 28, 10);
+      ctx.strokeStyle = '#a0a0a0';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(px + 4, py + T - 14, 28, 10);
+      // Pizza slice peeking
+      ctx.fillStyle = '#f6ad55';
+      ctx.beginPath();
+      ctx.moveTo(px + 28, py + T - 14);
+      ctx.lineTo(px + 36, py + T - 22);
+      ctx.lineTo(px + 22, py + T - 14);
+      ctx.closePath();
+      ctx.fill();
+      // Pepperoni
+      ctx.fillStyle = '#e53e3e';
+      ctx.beginPath(); ctx.arc(px + 28, py + T - 17, 2, 0, Math.PI * 2); ctx.fill();
+      break;
+    }
+    case 'ramen_cup': {
+      // White cylinder
+      ctx.fillStyle = '#f7f7f7';
+      ctx.fillRect(px + 10, py + T - 20, 16, 16);
+      ctx.fillStyle = '#e2e2e2';
+      ctx.beginPath();
+      ctx.ellipse(px + 18, py + T - 20, 8, 3, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // Red band
+      ctx.fillStyle = '#e53e3e';
+      ctx.fillRect(px + 10, py + T - 14, 16, 4);
+      // Steam lines
+      ctx.strokeStyle = '#ccc';
+      ctx.lineWidth = 1;
+      ctx.globalAlpha = 0.6;
+      for (let s = 0; s < 2; s++) {
+        const sx = px + 14 + s * 8;
+        ctx.beginPath();
+        ctx.moveTo(sx, py + T - 22);
+        ctx.quadraticCurveTo(sx + 2, py + T - 28, sx - 1, py + T - 32);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+      break;
+    }
+    case 'protein_bar': {
+      // Small wrapped rectangle
+      ctx.fillStyle = '#8b5cf6';
+      ctx.fillRect(px + 8, py + T - 10, 20, 6);
+      ctx.strokeStyle = '#6d28d9';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(px + 8, py + T - 10, 20, 6);
+      // Wrapper crinkle lines
+      ctx.strokeStyle = '#a78bfa';
+      ctx.beginPath();
+      ctx.moveTo(px + 12, py + T - 10);
+      ctx.lineTo(px + 12, py + T - 4);
+      ctx.moveTo(px + 24, py + T - 10);
+      ctx.lineTo(px + 24, py + T - 4);
+      ctx.stroke();
+      break;
+    }
+  }
 }
 
 /* ───────── component ───────── */
+type ViewFloor = 'all' | 1 | 2 | 3;
+
 interface PixelOfficeProps {
   agents: AgentSnapshot[];
   compact?: boolean;
   projectName?: string;
+  floorId?: ViewFloor;
 }
 
-export function PixelOffice({ agents, compact, projectName }: PixelOfficeProps) {
+export function PixelOffice({ agents, compact, projectName, floorId = 'all' }: PixelOfficeProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const simsRef = useRef<AgentSim[]>([]);
   const spritesRef = useRef<(HTMLImageElement | null)[]>([]);
   const furnitureImgsRef = useRef<Map<string, HTMLImageElement>>(new Map());
   const tickRef = useRef(0);
   const projectNameRef = useRef(projectName);
-  projectNameRef.current = projectName; // Always keep ref in sync with prop
+  projectNameRef.current = projectName;
+  const floorIdRef = useRef(floorId);
+  floorIdRef.current = floorId;
   const [loaded, setLoaded] = useState(false);
 
-  // Show ALL agents including offline — they'll sit dimmed at their desk
+  // Derive active config based on floorId
+  const activeConfig = useMemo(() => {
+    if (floorId === 'all' || !FLOOR_CONFIGS[floorId as 1 | 2 | 3]) {
+      return {
+        layout: LAYOUT,
+        deskTiles: DESK_TILES,
+        breakTiles: BREAK_TILES,
+        furniture: FURNITURE,
+        customSnacks: [] as { type: string; x: number; y: number }[],
+        colors: DEFAULT_COLORS,
+        wallLabel: '',
+        supervisorDesks: [SUPERVISOR_DESK, SUPERVISOR_2_DESK],
+      };
+    }
+    return FLOOR_CONFIGS[floorId as 1 | 2 | 3];
+  }, [floorId]);
+
+  const activeConfigRef = useRef(activeConfig);
+  activeConfigRef.current = activeConfig;
+
   const visible = useMemo(() => agents, [agents]);
 
   const canvasW = compact ? Math.min(W, 780) : W;
   const canvasH = compact ? Math.min(H, 420) : H;
   const scale = compact ? Math.min(canvasW / W, canvasH / H) : 1;
 
-  // Load all images
+  // Load all images (including all floor furniture)
   useEffect(() => {
     let cancelled = false;
     const promises: Promise<void>[] = [];
@@ -209,10 +329,15 @@ export function PixelOffice({ agents, compact, projectName }: PixelOfficeProps) 
       }));
     }
 
-    // Furniture images
+    // Collect ALL furniture image paths from default + all floors
+    const allFurniturePaths = new Set<string>();
+    FURNITURE.forEach(f => allFurniturePaths.add(f.img));
+    for (const floor of [1, 2, 3] as const) {
+      FLOOR_CONFIGS[floor].furniture.forEach(f => allFurniturePaths.add(f.img));
+    }
+
     const furMap = new Map<string, HTMLImageElement>();
-    const uniquePaths = new Set(FURNITURE.map(f => f.img));
-    for (const src of uniquePaths) {
+    for (const src of allFurniturePaths) {
       promises.push(new Promise(resolve => {
         const img = new Image();
         img.onload = () => { furMap.set(src, img); resolve(); };
@@ -221,7 +346,6 @@ export function PixelOffice({ agents, compact, projectName }: PixelOfficeProps) 
       }));
     }
 
-    // Floor/wall tiles
     const floorImg = new Image();
     promises.push(new Promise(r => { floorImg.onload = () => r(); floorImg.onerror = () => r(); floorImg.src = '/pixel-agents/floors.png'; }));
     const wallImg = new Image();
@@ -240,35 +364,47 @@ export function PixelOffice({ agents, compact, projectName }: PixelOfficeProps) 
   // Initialize / update agent simulations
   useEffect(() => {
     const existing = simsRef.current;
+    const cfg = activeConfig;
     const newSims: AgentSim[] = visible.map((agent, idx) => {
       const prev = existing.find(s => s.id === agent.agentId);
-      const desk = agent.role === 'supervisor' ? SUPERVISOR_DESK : agent.role === 'supervisor-2' ? SUPERVISOR_2_DESK : DESK_TILES[idx % DESK_TILES.length];
+      let desk: Vec;
+      if (floorId === 'all') {
+        desk = agent.role === 'supervisor' ? SUPERVISOR_DESK
+          : agent.role === 'supervisor-2' ? SUPERVISOR_2_DESK
+          : DESK_TILES[idx % DESK_TILES.length];
+      } else {
+        desk = cfg.supervisorDesks[0] && (agent.role === 'supervisor' || agent.role === 'supervisor-2')
+          ? cfg.supervisorDesks[idx % cfg.supervisorDesks.length]
+          : cfg.deskTiles[idx % cfg.deskTiles.length];
+      }
       const chairTile = { x: desk.x, y: desk.y + 1 };
 
       if (prev) {
-        // Update agent data, keep simulation state
         prev.agent = agent;
         prev.deskTile = desk;
-        // If status changed, potentially change behavior
         if (agent.status === 'idle' && prev.state === 'sit') {
           prev.stateTimer = Math.floor(Math.random() * 60) + 30;
         }
-        // Detect status transitions for visual reactions
         if (prev.lastKnownStatus !== agent.status) {
           if (agent.status === 'completed' ||
               (prev.lastKnownStatus === 'working' && agent.status === 'idle')) {
-            prev.celebrationTimer = 48; // 4 seconds at 12fps
+            prev.celebrationTimer = 48;
           }
           if (agent.status === 'blocked') {
-            prev.exclamationTimer = 120; // 10 seconds
+            prev.exclamationTimer = 120;
           }
           prev.lastKnownStatus = agent.status;
         }
         prev.taskLabel = agent.currentTask ? truncateTask(agent.currentTask) : '';
+        // If floor changed, teleport agent to new desk
+        if (prev.pos.x !== chairTile.x * T || prev.pos.y !== chairTile.y * T) {
+          if (prev.state === 'sit') {
+            prev.pos = { x: chairTile.x * T, y: chairTile.y * T };
+          }
+        }
         return prev;
       }
 
-      // New agent: start at their chair
       const isOffline = agent.status === 'offline';
       return {
         id: agent.agentId,
@@ -279,7 +415,7 @@ export function PixelOffice({ agents, compact, projectName }: PixelOfficeProps) 
         dest: { ...chairTile },
         path: [],
         state: 'sit' as const,
-        dir: 2, // facing up (toward desk)
+        dir: 2,
         frame: 0,
         stateTimer: isOffline ? 999999 : (agent.status === 'idle' ? 60 + Math.floor(Math.random() * 120) : 200 + Math.floor(Math.random() * 300)),
         deskTile: desk,
@@ -291,7 +427,7 @@ export function PixelOffice({ agents, compact, projectName }: PixelOfficeProps) 
     });
 
     simsRef.current = newSims;
-  }, [visible]);
+  }, [visible, activeConfig, floorId]);
 
   // Main game loop
   useEffect(() => {
@@ -313,47 +449,43 @@ export function PixelOffice({ agents, compact, projectName }: PixelOfficeProps) 
 
       tickRef.current++;
       const tick = tickRef.current;
+      const cfg = activeConfigRef.current;
+      const curFloorId = floorIdRef.current;
+      const colors = cfg.colors;
 
       ctx.imageSmoothingEnabled = false;
-      // Clear the entire canvas to prevent ghosting
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.save();
       ctx.scale(scale, scale);
 
-      // ── Draw floor ──
+      // ── Draw floor tiles ──
       for (let r = 0; r < ROWS; r++) {
         for (let c = 0; c < COLS; c++) {
-          const cell = LAYOUT[r][c];
+          const cell = cfg.layout[r][c];
           const px = c * T;
           const py = r * T;
 
           if (cell === 1) {
-            // Wall — dark wood paneling
-            ctx.fillStyle = r === 0 ? '#3a2a1a' : '#2e2010';
+            ctx.fillStyle = r === 0 ? colors.wallTop : (c === 0 || c === COLS - 1 ? colors.wallSide : colors.wallTop);
             ctx.fillRect(px, py, T, T);
             if (r === 0) {
-              // Wall trim / baseboard
-              ctx.fillStyle = '#4a3828';
+              ctx.fillStyle = colors.wallTrim;
               ctx.fillRect(px, py + T - 4, T, 4);
             }
             if (c === 0 || c === COLS - 1) {
-              // Side wall highlight
-              ctx.fillStyle = '#3d2c18';
+              ctx.fillStyle = colors.wallSide;
               ctx.fillRect(px, py, T, T);
             }
           } else if (cell === 5) {
-            // Break area — lighter warm brown (carpet feel)
-            ctx.fillStyle = (r + c) % 2 === 0 ? '#3a2e20' : '#3e3122';
+            ctx.fillStyle = (r + c) % 2 === 0 ? colors.break1 : colors.break2;
             ctx.fillRect(px, py, T, T);
-            ctx.strokeStyle = '#453626';
+            ctx.strokeStyle = colors.wallTrim;
             ctx.lineWidth = 0.5;
             ctx.strokeRect(px, py, T, T);
           } else {
-            // Regular floor — warm brown wood checkerboard
-            ctx.fillStyle = (r + c) % 2 === 0 ? '#2e2114' : '#332618';
+            ctx.fillStyle = (r + c) % 2 === 0 ? colors.floor1 : colors.floor2;
             ctx.fillRect(px, py, T, T);
-            // Subtle wood grain lines
-            ctx.strokeStyle = '#3a2c1c';
+            ctx.strokeStyle = colors.wallTrim;
             ctx.lineWidth = 0.5;
             ctx.strokeRect(px, py, T, T);
           }
@@ -361,51 +493,71 @@ export function PixelOffice({ agents, compact, projectName }: PixelOfficeProps) 
       }
 
       // ── Wall decorations ──
-      ctx.fillStyle = '#c8a87a';
+      ctx.fillStyle = colors.accent;
       ctx.font = `bold ${Z * 3}px monospace`;
       ctx.textAlign = 'center';
-      ctx.fillText((projectNameRef.current || 'AGENT HQ').toUpperCase(), 8 * T, T * 0.65);
-      // Room labels
-      ctx.fillStyle = '#8a7050';
-      ctx.font = `${Z * 2.5}px monospace`;
-      ctx.fillText('Work Area', 7 * T, T * 0.35);
-      ctx.fillText('Break Room', 17 * T, T * 0.35);
-      ctx.fillText('Server', 17 * T, 7.35 * T);
-      // Divider line between work area and break/server area
-      ctx.strokeStyle = '#4a3828';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(15 * T, T);
-      ctx.lineTo(15 * T, (ROWS - 1) * T);
-      ctx.stroke();
+      if (curFloorId !== 'all' && cfg.wallLabel) {
+        ctx.fillText(cfg.wallLabel, 8 * T, T * 0.65);
+      } else {
+        ctx.fillText((projectNameRef.current || 'AGENT HQ').toUpperCase(), 8 * T, T * 0.65);
+      }
+
+      if (curFloorId === 'all') {
+        // Default layout labels
+        ctx.fillStyle = '#8a7050';
+        ctx.font = `${Z * 2.5}px monospace`;
+        ctx.fillText('Work Area', 7 * T, T * 0.35);
+        ctx.fillText('Break Room', 17 * T, T * 0.35);
+        ctx.fillText('Server', 17 * T, 7.35 * T);
+        ctx.strokeStyle = colors.wallTrim;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(15 * T, T);
+        ctx.lineTo(15 * T, (ROWS - 1) * T);
+        ctx.stroke();
+      }
 
       // ── Draw furniture ──
-      for (const fur of FURNITURE) {
+      for (const fur of cfg.furniture) {
         const img = furnitureImgsRef.current.get(fur.img);
         if (img) {
-          const px = fur.x * T;
-          const py = fur.y * T;
+          const fpx = fur.x * T;
+          const fpy = fur.y * T;
           const dw = (fur.w / S) * T;
           const dh = (fur.h / S) * T;
-          // Furniture is drawn with bottom aligned to tile
-          ctx.drawImage(img, px, py + T - dh, dw, dh);
+          ctx.drawImage(img, fpx, fpy + T - dh, dw, dh);
         }
       }
 
-      // ── Rataa label (drawn after furniture so desk doesn't cover it) ──
-      ctx.fillStyle = '#9333ea';
-      ctx.font = `bold ${Z * 2.5}px monospace`;
-      ctx.textAlign = 'center';
-      ctx.fillText('Rataa', 17 * T, 9.15 * T);
+      // ── Custom snacks (canvas-drawn) ──
+      for (const snack of cfg.customSnacks) {
+        drawCustomSnack(ctx, snack.type, snack.x, snack.y);
+      }
+
+      // ── Rataa label (all-floors only) ──
+      if (curFloorId === 'all') {
+        ctx.fillStyle = '#9333ea';
+        ctx.font = `bold ${Z * 2.5}px monospace`;
+        ctx.textAlign = 'center';
+        ctx.fillText('Rataa', 17 * T, 9.15 * T);
+      }
+
+      // ── Floor accent for Ops Center ──
+      if (curFloorId === 3) {
+        // Red alert strip along bottom wall
+        ctx.fillStyle = colors.accent;
+        ctx.globalAlpha = 0.3 + Math.sin(tick * 0.05) * 0.15;
+        ctx.fillRect(T, (ROWS - 1) * T, (COLS - 2) * T, 3);
+        ctx.globalAlpha = 1;
+      }
 
       // ── Update & draw agents ──
       const sims = simsRef.current;
-      // Sort by Y for depth ordering
       const sorted = [...sims].sort((a, b) => a.pos.y - b.pos.y);
 
       for (const sim of sorted) {
-        updateAgent(sim, tick);
-        drawAgentSim(ctx, sim, tick);
+        updateAgent(sim, tick, cfg);
+        drawAgentSim(ctx, sim, tick, cfg);
       }
 
       ctx.restore();
@@ -415,8 +567,7 @@ export function PixelOffice({ agents, compact, projectName }: PixelOfficeProps) 
     return () => cancelAnimationFrame(animId);
   }, [loaded, scale]);
 
-  function updateAgent(sim: AgentSim, _tick: number) {
-    // Offline agents stay frozen at desk
+  function updateAgent(sim: AgentSim, _tick: number, cfg: FloorConfig | typeof activeConfig) {
     if (sim.agent.status === 'offline') {
       sim.state = 'sit';
       sim.dir = 2;
@@ -424,55 +575,45 @@ export function PixelOffice({ agents, compact, projectName }: PixelOfficeProps) 
       return;
     }
 
-    // Blocked agents stay at desk — don't wander
     if (sim.agent.status === 'blocked' && sim.state === 'sit') {
-      sim.dir = 2; // face desk
+      sim.dir = 2;
       sim.frame = (sim.frame + 1) % 3600;
       if (sim.exclamationTimer > 0) sim.exclamationTimer--;
       if (sim.celebrationTimer > 0) sim.celebrationTimer--;
       return;
     }
 
-    // Decrement effect timers
     if (sim.celebrationTimer > 0) sim.celebrationTimer--;
     if (sim.exclamationTimer > 0) sim.exclamationTimer--;
 
     sim.stateTimer--;
-    sim.frame = (sim.frame + 1) % 3600; // reset every 3600 frames (~5 min at 12fps) to avoid overflow
+    sim.frame = (sim.frame + 1) % 3600;
 
-    const speed = 2 * Z; // pixels per frame
+    const speed = 2 * Z;
+    const layout = cfg.layout;
 
     switch (sim.state) {
       case 'sit': {
-        sim.dir = 2; // face up toward desk
-        // Occasionally go on break or walk around if idle
+        sim.dir = 2;
         if (sim.stateTimer <= 0) {
           if (sim.agent.status === 'idle') {
-            // Idle agents wander
             const action = Math.random();
-            if (action < 0.4) {
-              goToBreakRoom(sim);
-            } else if (action < 0.7) {
-              goWander(sim);
-            } else {
+            if (action < 0.4) goToBreakRoom(sim, cfg);
+            else if (action < 0.7) goWander(sim, cfg);
+            else {
               sim.state = 'think';
               sim.stateTimer = 40 + Math.floor(Math.random() * 60);
             }
           } else {
-            // Working agents occasionally get coffee
             const action = Math.random();
-            if (action < 0.15) {
-              goToBreakRoom(sim);
-            } else {
-              sim.stateTimer = 150 + Math.floor(Math.random() * 200);
-            }
+            if (action < 0.15) goToBreakRoom(sim, cfg);
+            else sim.stateTimer = 150 + Math.floor(Math.random() * 200);
           }
         }
         break;
       }
 
       case 'walk': {
-        // Move toward next path tile
         const targetPx = sim.target.x * T;
         const targetPy = sim.target.y * T;
         const dx = targetPx - sim.pos.x;
@@ -486,17 +627,16 @@ export function PixelOffice({ agents, compact, projectName }: PixelOfficeProps) 
             sim.target = sim.path.shift()!;
             updateDirection(sim, sim.target);
           } else {
-            // Reached destination
             if (sim.dest.x === sim.deskTile.x && sim.dest.y === sim.deskTile.y + 1) {
               sim.state = 'sit';
               sim.dir = 2;
               sim.stateTimer = sim.agent.status === 'idle'
                 ? 60 + Math.floor(Math.random() * 120)
                 : 200 + Math.floor(Math.random() * 300);
-            } else if (LAYOUT[sim.dest.y]?.[sim.dest.x] === 5) {
+            } else if (layout[sim.dest.y]?.[sim.dest.x] === 5) {
               sim.state = 'break';
               sim.stateTimer = 80 + Math.floor(Math.random() * 120);
-              sim.dir = 0; // face down
+              sim.dir = 0;
             } else {
               sim.state = 'idle';
               sim.stateTimer = 30 + Math.floor(Math.random() * 60);
@@ -512,20 +652,14 @@ export function PixelOffice({ agents, compact, projectName }: PixelOfficeProps) 
       }
 
       case 'break': {
-        if (sim.stateTimer <= 0) {
-          goToDesk(sim);
-        }
+        if (sim.stateTimer <= 0) goToDesk(sim, cfg);
         break;
       }
 
       case 'idle': {
         if (sim.stateTimer <= 0) {
-          const action = Math.random();
-          if (action < 0.5) {
-            goToDesk(sim);
-          } else {
-            goWander(sim);
-          }
+          if (Math.random() < 0.5) goToDesk(sim, cfg);
+          else goWander(sim, cfg);
         }
         break;
       }
@@ -540,29 +674,29 @@ export function PixelOffice({ agents, compact, projectName }: PixelOfficeProps) 
     }
   }
 
-  /** Snap agent to nearest walkable tile for BFS start point */
-  function nearestWalkable(px: number, py: number): Vec {
+  function nearestWalkable(layout: number[][], px: number, py: number): Vec {
     const tx = Math.round(px / T);
     const ty = Math.round(py / T);
-    if (isWalkable(tx, ty)) return { x: tx, y: ty };
-    // Search nearby tiles in expanding ring
+    if (isWalkableOn(layout, tx, ty)) return { x: tx, y: ty };
     for (let d = 1; d <= 3; d++) {
       for (let dy = -d; dy <= d; dy++) {
         for (let dx = -d; dx <= d; dx++) {
           if (Math.abs(dx) !== d && Math.abs(dy) !== d) continue;
-          if (isWalkable(tx + dx, ty + dy)) return { x: tx + dx, y: ty + dy };
+          if (isWalkableOn(layout, tx + dx, ty + dy)) return { x: tx + dx, y: ty + dy };
         }
       }
     }
-    return { x: tx, y: ty }; // fallback
+    return { x: tx, y: ty };
   }
 
-  function goToBreakRoom(sim: AgentSim) {
-    const breakTarget = BREAK_TILES[Math.floor(Math.random() * BREAK_TILES.length)];
-    const fromTile = nearestWalkable(sim.pos.x, sim.pos.y);
-    const path = bfs(fromTile, breakTarget);
+  function goToBreakRoom(sim: AgentSim, cfg: FloorConfig | typeof activeConfig) {
+    const bt = cfg.breakTiles;
+    if (bt.length === 0) return;
+    const breakTarget = bt[Math.floor(Math.random() * bt.length)];
+    const fromTile = nearestWalkable(cfg.layout, sim.pos.x, sim.pos.y);
+    const path = bfsOn(cfg.layout, fromTile, breakTarget);
     if (path.length > 0) {
-      sim.pos = { x: fromTile.x * T, y: fromTile.y * T }; // snap to grid before walk
+      sim.pos = { x: fromTile.x * T, y: fromTile.y * T };
       sim.state = 'walk';
       sim.path = path;
       sim.dest = breakTarget;
@@ -571,19 +705,18 @@ export function PixelOffice({ agents, compact, projectName }: PixelOfficeProps) 
     }
   }
 
-  function goToDesk(sim: AgentSim) {
+  function goToDesk(sim: AgentSim, cfg: FloorConfig | typeof activeConfig) {
     const chairTile = { x: sim.deskTile.x, y: sim.deskTile.y + 1 };
-    const fromTile = nearestWalkable(sim.pos.x, sim.pos.y);
-    const path = bfs(fromTile, chairTile);
+    const fromTile = nearestWalkable(cfg.layout, sim.pos.x, sim.pos.y);
+    const path = bfsOn(cfg.layout, fromTile, chairTile);
     if (path.length > 0) {
-      sim.pos = { x: fromTile.x * T, y: fromTile.y * T }; // snap to grid
+      sim.pos = { x: fromTile.x * T, y: fromTile.y * T };
       sim.state = 'walk';
       sim.path = path;
       sim.dest = chairTile;
       sim.target = path.shift()!;
       updateDirection(sim, sim.target);
     } else {
-      // Teleport back if no path
       sim.pos = { x: chairTile.x * T, y: chairTile.y * T };
       sim.state = 'sit';
       sim.dir = 2;
@@ -591,20 +724,19 @@ export function PixelOffice({ agents, compact, projectName }: PixelOfficeProps) 
     }
   }
 
-  function goWander(sim: AgentSim) {
-    // Pick a random walkable tile
+  function goWander(sim: AgentSim, cfg: FloorConfig | typeof activeConfig) {
     const candidates: Vec[] = [];
     for (let r = 1; r < ROWS - 1; r++) {
       for (let c = 1; c < COLS - 1; c++) {
-        if (isWalkable(c, r)) candidates.push({ x: c, y: r });
+        if (isWalkableOn(cfg.layout, c, r)) candidates.push({ x: c, y: r });
       }
     }
     if (candidates.length === 0) return;
     const target = candidates[Math.floor(Math.random() * candidates.length)];
-    const fromTile = nearestWalkable(sim.pos.x, sim.pos.y);
-    const path = bfs(fromTile, target);
+    const fromTile = nearestWalkable(cfg.layout, sim.pos.x, sim.pos.y);
+    const path = bfsOn(cfg.layout, fromTile, target);
     if (path.length > 0 && path.length < 20) {
-      sim.pos = { x: fromTile.x * T, y: fromTile.y * T }; // snap to grid
+      sim.pos = { x: fromTile.x * T, y: fromTile.y * T };
       sim.state = 'walk';
       sim.path = path;
       sim.dest = target;
@@ -616,61 +748,46 @@ export function PixelOffice({ agents, compact, projectName }: PixelOfficeProps) 
   function updateDirection(sim: AgentSim, target: Vec) {
     const dx = target.x * T - sim.pos.x;
     const dy = target.y * T - sim.pos.y;
-    if (Math.abs(dy) >= Math.abs(dx)) {
-      sim.dir = dy > 0 ? 0 : 2;
-    } else {
-      sim.dir = dx > 0 ? 3 : 1;
-    }
+    if (Math.abs(dy) >= Math.abs(dx)) sim.dir = dy > 0 ? 0 : 2;
+    else sim.dir = dx > 0 ? 3 : 1;
   }
 
-  function drawAgentSim(ctx: CanvasRenderingContext2D, sim: AgentSim, tick: number) {
+  function drawAgentSim(ctx: CanvasRenderingContext2D, sim: AgentSim, tick: number, _cfg: FloorConfig | typeof activeConfig) {
     const isOffline = sim.agent.status === 'offline';
     const sprite = spritesRef.current[sim.charIdx % 6];
     const dotColor = STATUS_COLOR[sim.agent.status] || '#476256';
 
-    // Dim offline agents
     if (isOffline) ctx.globalAlpha = 0.4;
-
-    // Sprite sheet: 7 columns (0-6), 6 rows (0-5)
-    // Rows 0-3: walk directions (down, left, up, right) — columns 0-3 are walk frames
-    // Row 4: sitting/working animations — cols 0-2 typing, cols 3-4 planning, cols 5-6 misc
-    // Row 5: special/thinking animations — cols 0-2
 
     let sprRow = 0;
     let sprCol = 0;
 
     switch (sim.state) {
       case 'walk':
-        sprRow = Math.min(sim.dir, 3); // clamp direction to rows 0-3
-        sprCol = Math.floor(sim.frame / 4) % 4; // walk cycle: cols 0-3
+        sprRow = Math.min(sim.dir, 3);
+        sprCol = Math.floor(sim.frame / 4) % 4;
         break;
       case 'sit':
         sprRow = 4;
-        if (sim.agent.status === 'working') {
-          sprCol = Math.floor(sim.frame / 8) % 3; // typing: cols 0-2
-        } else if (sim.agent.status === 'planning') {
-          sprCol = (Math.floor(sim.frame / 10) % 2) + 3; // planning: cols 3-4
-        } else if (sim.agent.status === 'reviewing') {
-          sprCol = Math.floor(sim.frame / 6) % 3; // review: cols 0-2 (reuse typing)
-        } else {
-          sprCol = 0; // idle at desk: col 0
-        }
+        if (sim.agent.status === 'working') sprCol = Math.floor(sim.frame / 8) % 3;
+        else if (sim.agent.status === 'planning') sprCol = (Math.floor(sim.frame / 10) % 2) + 3;
+        else if (sim.agent.status === 'reviewing') sprCol = Math.floor(sim.frame / 6) % 3;
+        else sprCol = 0;
         break;
       case 'think':
         sprRow = 5;
-        sprCol = Math.floor(sim.frame / 12) % 3; // cols 0-2
+        sprCol = Math.floor(sim.frame / 12) % 3;
         break;
       case 'break':
-        sprRow = 0; // facing down
-        sprCol = 0; // standing still
+        sprRow = 0;
+        sprCol = 0;
         break;
       case 'idle':
-        sprRow = sim.dir; // face current direction
-        sprCol = Math.floor(sim.frame / 15) % 2; // gentle sway: cols 0-1
+        sprRow = sim.dir;
+        sprCol = Math.floor(sim.frame / 15) % 2;
         break;
     }
 
-    // Hard clamp to sprite sheet bounds (7 cols × 6 rows)
     sprCol = Math.max(0, Math.min(sprCol, 6));
     sprRow = Math.max(0, Math.min(sprRow, 5));
 
@@ -683,7 +800,7 @@ export function PixelOffice({ agents, compact, projectName }: PixelOfficeProps) 
     ctx.ellipse(px + T / 2, py + T - 2, T * 0.35, T * 0.12, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    // Draw sprite
+    // Sprite
     if (sprite) {
       ctx.drawImage(sprite, sprCol * S, sprRow * S, S, S, px, py - T * 0.2, T, T);
     } else {
@@ -710,7 +827,7 @@ export function PixelOffice({ agents, compact, projectName }: PixelOfficeProps) 
       ctx.globalAlpha = 1;
     }
 
-    // Think bubble for planning/thinking
+    // Think bubble
     if (sim.state === 'think' || (sim.state === 'sit' && sim.agent.status === 'planning')) {
       const bx = px + T + 4;
       const by = py - T * 0.4;
@@ -724,7 +841,6 @@ export function PixelOffice({ agents, compact, projectName }: PixelOfficeProps) 
       ctx.font = `${Z * 3}px monospace`;
       ctx.textAlign = 'center';
       ctx.fillText('?', bx + 12, by + 3);
-      // Thought dots
       ctx.fillStyle = '#fff';
       ctx.globalAlpha = 0.6;
       ctx.beginPath(); ctx.arc(bx + 2, by + 8, 3, 0, Math.PI * 2); ctx.fill();
@@ -732,7 +848,7 @@ export function PixelOffice({ agents, compact, projectName }: PixelOfficeProps) 
       ctx.globalAlpha = 1;
     }
 
-    // Typing particles for working at desk
+    // Typing particles
     if (sim.state === 'sit' && (sim.agent.status === 'working' || sim.agent.status === 'reviewing')) {
       for (let p = 0; p < 3; p++) {
         const phase = tick * 0.2 + p * 2.1;
@@ -745,13 +861,12 @@ export function PixelOffice({ agents, compact, projectName }: PixelOfficeProps) 
       ctx.globalAlpha = 1;
     }
 
-    // Coffee cup icon when on break
+    // Coffee cup on break
     if (sim.state === 'break') {
       ctx.fillStyle = '#8B4513';
       ctx.fillRect(px + T / 2 - 4, py - T * 0.3, 8, 10);
       ctx.fillStyle = '#fff';
       ctx.globalAlpha = 0.5 + Math.sin(tick * 0.1) * 0.3;
-      // Steam
       for (let s = 0; s < 2; s++) {
         const sx = px + T / 2 - 2 + s * 4;
         const sy = py - T * 0.3 - 4 - Math.sin(tick * 0.08 + s) * 4;
@@ -775,12 +890,11 @@ export function PixelOffice({ agents, compact, projectName }: PixelOfficeProps) 
                   sim.agent.status.charAt(0).toUpperCase() + sim.agent.status.slice(1);
     ctx.fillText(label, px + T / 2, py + T + 21);
 
-    // Restore alpha for offline agents
     if (isOffline) { ctx.globalAlpha = 1; return; }
 
     // ── Pixel Sync Visual Effects ──
 
-    // (A) Current task label above agent when working at desk
+    // Task label
     if (sim.state === 'sit' && sim.taskLabel &&
         (sim.agent.status === 'working' || sim.agent.status === 'reviewing')) {
       const taskX = px + T / 2;
@@ -800,10 +914,9 @@ export function PixelOffice({ agents, compact, projectName }: PixelOfficeProps) 
       ctx.fillText(sim.taskLabel, taskX, taskY + 3);
     }
 
-    // (B) Celebration sparkles (when celebrationTimer > 0)
+    // Celebration sparkles
     if (sim.celebrationTimer > 0) {
       const progress = sim.celebrationTimer / 48;
-      // Green checkmark (first half)
       if (sim.celebrationTimer > 24) {
         ctx.fillStyle = '#4ade80';
         ctx.globalAlpha = Math.min(1, (sim.celebrationTimer - 24) / 12);
@@ -812,7 +925,6 @@ export function PixelOffice({ agents, compact, projectName }: PixelOfficeProps) 
         ctx.fillText('\u2713', px + T / 2, py - T * 0.6);
         ctx.globalAlpha = 1;
       }
-      // Sparkle particles
       for (let i = 0; i < 5; i++) {
         const angle = (i / 5) * Math.PI * 2 + sim.frame * 0.1;
         const radius = T * 0.6 * (1 - progress * 0.5);
@@ -825,7 +937,7 @@ export function PixelOffice({ agents, compact, projectName }: PixelOfficeProps) 
       ctx.globalAlpha = 1;
     }
 
-    // (C) Blocked exclamation mark
+    // Blocked exclamation
     if (sim.agent.status === 'blocked' || sim.exclamationTimer > 0) {
       const blink = Math.floor(sim.frame / 8) % 2 === 0;
       if (blink || sim.agent.status === 'blocked') {
@@ -838,7 +950,7 @@ export function PixelOffice({ agents, compact, projectName }: PixelOfficeProps) 
       }
     }
 
-    // (D) Heartbeat pulse ring
+    // Heartbeat pulse
     if (sim.agent.lastHeartbeat &&
         (sim.agent.status === 'working' || sim.agent.status === 'planning')) {
       const hbAge = Date.now() - new Date(sim.agent.lastHeartbeat).getTime();

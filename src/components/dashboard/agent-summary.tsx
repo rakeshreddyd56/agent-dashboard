@@ -6,12 +6,19 @@ import { useProjectStore } from '@/lib/store/project-store';
 import { AGENT_ROLES } from '@/lib/constants';
 import { RoleIcon } from '@/components/shared/role-icon';
 import { StatusBadge } from '@/components/shared/status-badge';
+import { useOfficeStore } from '@/lib/store/office-store';
+import { getFloorAgentRoles } from '@/lib/utils/floor-filter';
 import type { AgentStatus, AgentRole } from '@/lib/types';
 
 export function AgentSummary() {
   const allAgents = useAgentStore((s) => s.agents);
   const activeProjectId = useProjectStore((s) => s.activeProjectId);
+  const viewFloor = useOfficeStore((s) => s.viewFloor);
   const agents = activeProjectId ? allAgents.filter((a) => a.projectId === activeProjectId) : allAgents;
+
+  const visibleRoles = viewFloor === 'all'
+    ? AGENT_ROLES
+    : AGENT_ROLES.filter((r) => getFloorAgentRoles(viewFloor).has(r.role));
 
   return (
     <Card className="border-border/50">
@@ -20,7 +27,7 @@ export function AgentSummary() {
       </CardHeader>
       <CardContent>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
-          {AGENT_ROLES.map((roleDef) => {
+          {visibleRoles.map((roleDef) => {
             const agent = agents.find((a) => a.role === roleDef.role);
             const status = (agent?.status || 'offline') as AgentStatus;
             return (

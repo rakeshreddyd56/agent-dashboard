@@ -10,10 +10,13 @@ interface FloorStatus {
   label: string;
 }
 
+type ViewFloor = 'all' | 1 | 2 | 3;
+
 interface OfficeStore {
   // State
   officeState: OfficeState;
   activeFloor: FloorNumber | null;
+  viewFloor: ViewFloor;
   currentSession: ResearchSession | null;
   recentSessions: ResearchSession[];
   floorStatuses: FloorStatus[];
@@ -25,6 +28,7 @@ interface OfficeStore {
   // Actions
   setOfficeState: (state: OfficeState) => void;
   setActiveFloor: (floor: FloorNumber | null) => void;
+  setViewFloor: (floor: ViewFloor) => void;
   setCurrentSession: (session: ResearchSession | null) => void;
   setRecentSessions: (sessions: ResearchSession[]) => void;
   setFloorStatuses: (statuses: FloorStatus[]) => void;
@@ -49,6 +53,7 @@ interface OfficeStore {
 export const useOfficeStore = create<OfficeStore>((set) => ({
   officeState: 'IDLE',
   activeFloor: null,
+  viewFloor: 'all' as ViewFloor,
   currentSession: null,
   recentSessions: [],
   floorStatuses: [
@@ -63,6 +68,7 @@ export const useOfficeStore = create<OfficeStore>((set) => ({
 
   setOfficeState: (officeState) => set({ officeState }),
   setActiveFloor: (activeFloor) => set({ activeFloor }),
+  setViewFloor: (viewFloor) => set({ viewFloor }),
   setCurrentSession: (currentSession) => set({ currentSession }),
   setRecentSessions: (recentSessions) => set({ recentSessions }),
   setFloorStatuses: (floorStatuses) => set({ floorStatuses }),
