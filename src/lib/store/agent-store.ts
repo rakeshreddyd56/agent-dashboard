@@ -8,9 +8,21 @@ interface AgentStore {
   upsertAgent: (agentId: string, data: Partial<AgentSnapshot>) => void;
 }
 
-export const useAgentStore = create<AgentStore>((set) => ({
+export const useAgentStore = create<AgentStore>((set, get) => ({
   agents: [],
-  setAgents: (agents) => set({ agents }),
+  setAgents: (agents) => {
+    // Skip update if agents haven't meaningfully changed (prevents pixel glitching)
+    const current = get().agents;
+    if (current.length === agents.length && agents.length > 0) {
+      const same = agents.every((a, i) => {
+        const c = current[i];
+        return c && c.agentId === a.agentId && c.status === a.status
+          && c.currentTask === a.currentTask && c.lastHeartbeat === a.lastHeartbeat;
+      });
+      if (same) return;
+    }
+    set({ agents });
+  },
   updateAgent: (agentId, updates) =>
     set((state) => ({
       agents: state.agents.map((a) =>

@@ -101,16 +101,16 @@ function buildFloor1(): FloorConfig {
     { img: '/pixel-agents/furniture/chairs/STOOL.png', x: 4, y: 7, w: 16, h: 16 },
     { img: '/pixel-agents/furniture/chairs/STOOL.png', x: 6, y: 7, w: 16, h: 16 },
     // Bookshelves along left wall
-    { img: '/pixel-agents/furniture/decor/FULL_BOOKSHELF_TALL.png', x: 1, y: 2, w: 16, h: 32 },
-    { img: '/pixel-agents/furniture/decor/FULL_BOOKSHELF_TALL.png', x: 1, y: 4, w: 16, h: 32 },
-    { img: '/pixel-agents/furniture/decor/BOOKSHELF_TALL.png', x: 1, y: 6, w: 16, h: 32 },
+    { img: '/pixel-agents/furniture/storage/FULL_BOOKSHELF_TALL.png', x: 1, y: 2, w: 16, h: 32 },
+    { img: '/pixel-agents/furniture/storage/FULL_BOOKSHELF_TALL.png', x: 1, y: 4, w: 16, h: 32 },
+    { img: '/pixel-agents/furniture/storage/BOOKSHELF_TALL.png', x: 1, y: 6, w: 16, h: 32 },
     // Book accents
     { img: '/pixel-agents/furniture/decor/BOOK_SINGLE_BLUE.png', x: 2, y: 2, w: 16, h: 16 },
     { img: '/pixel-agents/furniture/decor/BOOK_SINGLE_RED.png', x: 2, y: 4, w: 16, h: 16 },
     // Whiteboard
-    { img: '/pixel-agents/furniture/misc/DEFAULT_WHITEBOARD.png', x: 10, y: 2, w: 32, h: 32 },
+    { img: '/pixel-agents/furniture/decor/DEFAULT_WHITEBOARD.png', x: 10, y: 2, w: 32, h: 32 },
     // Wall painting
-    { img: '/pixel-agents/furniture/decor/PAINTING_LANDSCAPE.png', x: 12, y: 1, w: 32, h: 16 },
+    { img: '/pixel-agents/furniture/wall/PAINTING_LANDSCAPE.png', x: 12, y: 1, w: 32, h: 16 },
     // Plants in corners
     { img: '/pixel-agents/furniture/decor/DEFAULT_PLANT.png', x: 1, y: 12, w: 16, h: 32 },
     { img: '/pixel-agents/furniture/decor/DEFAULT_PLANT.png', x: 18, y: 12, w: 16, h: 32 },
@@ -187,13 +187,13 @@ function buildFloor2(): FloorConfig {
     // Chairs
     ...chairs.map(c => ({ img: '/pixel-agents/furniture/chairs/CHAIR_ROTATING_FRONT.png', x: c.x, y: c.y, w: 16, h: 16 })),
     // Whiteboard + chalkboard
-    { img: '/pixel-agents/furniture/misc/DEFAULT_WHITEBOARD.png', x: 16, y: 8, w: 32, h: 32 },
-    { img: '/pixel-agents/furniture/misc/CHALKBOARD_WALL_SM.png', x: 18, y: 8, w: 16, h: 16 },
+    { img: '/pixel-agents/furniture/decor/DEFAULT_WHITEBOARD.png', x: 16, y: 8, w: 32, h: 32 },
+    { img: '/pixel-agents/furniture/wall/CHALKBOARD_WALL_SM.png', x: 18, y: 8, w: 16, h: 16 },
     // Code review counter
     { img: '/pixel-agents/furniture/desks/COUNTER_WOOD_MD.png', x: 16, y: 10, w: 32, h: 32 },
     // Break room
     { img: '/pixel-agents/furniture/misc/VENDING_MACHINE.png', x: 18, y: 2, w: 32, h: 32 },
-    { img: '/pixel-agents/furniture/misc/FRIDGE.png', x: 16, y: 2, w: 16, h: 32 },
+    { img: '/pixel-agents/furniture/storage/FRIDGE.png', x: 16, y: 2, w: 16, h: 32 },
     { img: '/pixel-agents/furniture/desks/COFFEE_TABLE_LG.png', x: 17, y: 4, w: 32, h: 32 },
     // Decor
     { img: '/pixel-agents/furniture/misc/BIN.png', x: 15, y: 12, w: 16, h: 16 },
@@ -272,15 +272,15 @@ function buildFloor3(): FloorConfig {
     { img: '/pixel-agents/furniture/electronics/SERVER.png', x: 16, y: 6, w: 16, h: 32 },
     { img: '/pixel-agents/furniture/electronics/SERVER.png', x: 17, y: 6, w: 16, h: 32 },
     // Charts on walls
-    { img: '/pixel-agents/furniture/decor/CHART_1.png', x: 3, y: 1, w: 32, h: 16 },
-    { img: '/pixel-agents/furniture/decor/CHART_2.png', x: 6, y: 1, w: 32, h: 16 },
-    { img: '/pixel-agents/furniture/decor/CHART_SM_1.png', x: 9, y: 1, w: 16, h: 16 },
-    { img: '/pixel-agents/furniture/decor/CHART_SM_2.png', x: 11, y: 1, w: 16, h: 16 },
+    { img: '/pixel-agents/furniture/wall/CHART_1.png', x: 3, y: 1, w: 32, h: 16 },
+    { img: '/pixel-agents/furniture/wall/CHART_2.png', x: 6, y: 1, w: 32, h: 16 },
+    { img: '/pixel-agents/furniture/wall/CHART_SM_1.png', x: 9, y: 1, w: 16, h: 16 },
+    { img: '/pixel-agents/furniture/wall/CHART_SM_2.png', x: 11, y: 1, w: 16, h: 16 },
     // Alert station
     { img: '/pixel-agents/furniture/electronics/TELEPHONE.png', x: 16, y: 9, w: 16, h: 16 },
     { img: '/pixel-agents/furniture/electronics/PRINTER_DESKTOP.png', x: 17, y: 9, w: 16, h: 32 },
     // Staging crates
-    { img: '/pixel-agents/furniture/misc/CRATES.png', x: 16, y: 11, w: 32, h: 32 },
+    { img: '/pixel-agents/furniture/storage/CRATES.png', x: 16, y: 11, w: 32, h: 32 },
     // Break area
     { img: '/pixel-agents/furniture/misc/COFFEE_MACHINE.png', x: 2, y: 10, w: 16, h: 32 },
     { img: '/pixel-agents/furniture/desks/COFFEE_TABLE_LG.png', x: 3, y: 11, w: 32, h: 32 },

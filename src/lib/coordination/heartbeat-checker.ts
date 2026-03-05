@@ -238,21 +238,25 @@ export function checkStaleAgents(projectId: string): void {
 
     // Proactively trigger sync + auto-relay when agents complete
     // Sync first to pick up TASKS.md changes the agents wrote, then relay
-    try {
-      import('@/lib/coordination/sync-engine').then(async ({ syncProject }) => {
-        const project = require('@/lib/db').db
-          .select()
-          .from(require('@/lib/db').schema.projects)
-          .where(require('drizzle-orm').eq(require('@/lib/db').schema.projects.id, projectId))
-          .get();
-        if (project) await syncProject(project).catch(() => {});
-      }).catch(() => {});
-    } catch { /* non-fatal */ }
-
-    try {
-      import('@/lib/coordination/relay').then(({ runAutoRelay }) => {
-        runAutoRelay(projectId).catch(() => {});
-      }).catch(() => {});
-    } catch { /* non-fatal */ }
+    triggerPostCompletionSync(projectId);
   }
+}
+
+/** Trigger sync + auto-relay after agent completion (non-blocking, non-fatal) */
+async function triggerPostCompletionSync(projectId: string) {
+  try {
+    const [{ db, schema }, { eq }, { syncProject }] = await Promise.all([
+      import('@/lib/db'),
+      import('drizzle-orm'),
+      import('@/lib/coordination/sync-engine'),
+    ]);
+    const project = db.select().from(schema.projects)
+      .where(eq(schema.projects.id, projectId)).get();
+    if (project) await syncProject(project as Parameters<typeof syncProject>[0]);
+  } catch { /* non-fatal */ }
+
+  try {
+    const { runAutoRelay } = await import('@/lib/coordination/relay');
+    await runAutoRelay(projectId);
+  } catch { /* non-fatal */ }
 }

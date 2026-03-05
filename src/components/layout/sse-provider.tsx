@@ -136,10 +136,10 @@ export function SSEProvider() {
       if (agentData?.agents) useAgentStore.getState().setAgents(agentData.agents);
     }).catch(console.error);
 
-    // On project change, clear stale data from old project
+    // On project change, clear stale tasks (agents preserved until new data arrives
+    // to avoid pixel office glitching from empty-array gap)
     if (projectChanged) {
       useTaskStore.getState().setTasks([]);
-      useAgentStore.getState().setAgents([]);
     }
 
     // Connect SSE

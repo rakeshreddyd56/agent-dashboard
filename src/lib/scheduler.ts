@@ -108,7 +108,7 @@ async function tick() {
 
       switch (key) {
         case 'heartbeat_check':
-          result = runHeartbeatCheck();
+          result = await runHeartbeatCheck();
           break;
         case 'analytics_cleanup':
           result = runAnalyticsCleanup();
@@ -144,7 +144,7 @@ async function tick() {
 
 /** Run heartbeat check — delegates to per-project heartbeat checker which
  *  actively probes tmux sessions to distinguish working agents from crashed ones. */
-function runHeartbeatCheck(): { ok: boolean; message: string } {
+async function runHeartbeatCheck(): Promise<{ ok: boolean; message: string }> {
   const activeProjects = db
     .select()
     .from(schema.projects)
@@ -156,10 +156,9 @@ function runHeartbeatCheck(): { ok: boolean; message: string } {
   }
 
   let checked = 0;
+  const { checkStaleAgents } = await import('@/lib/coordination/heartbeat-checker');
   for (const project of activeProjects) {
     try {
-      // Dynamic import to avoid circular dependency
-      const { checkStaleAgents } = require('@/lib/coordination/heartbeat-checker');
       checkStaleAgents(project.id);
       checked++;
     } catch (err) {

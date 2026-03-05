@@ -307,7 +307,16 @@ export function PixelOffice({ agents, compact, projectName, floorId = 'all' }: P
   const activeConfigRef = useRef(activeConfig);
   activeConfigRef.current = activeConfig;
 
-  const visible = useMemo(() => agents, [agents]);
+  // Stabilize: keep last non-empty agents array to prevent glitching during SSE sync gaps
+  const lastAgentsRef = useRef<AgentSnapshot[]>(agents);
+  const visible = useMemo(() => {
+    if (agents.length === 0 && lastAgentsRef.current.length > 0) {
+      // Don't wipe sims during brief empty-array gaps from SSE sync
+      return lastAgentsRef.current;
+    }
+    lastAgentsRef.current = agents;
+    return agents;
+  }, [agents]);
 
   const canvasW = compact ? Math.min(W, 780) : W;
   const canvasH = compact ? Math.min(H, 420) : H;
@@ -363,7 +372,15 @@ export function PixelOffice({ agents, compact, projectName, floorId = 'all' }: P
 
   // Initialize / update agent simulations
   useEffect(() => {
+    // Skip if agents haven't meaningfully changed (same IDs + statuses)
     const existing = simsRef.current;
+    const prevKey = existing.map(s => `${s.id}:${s.agent.status}:${s.agent.currentTask || ''}`).sort().join('|');
+    const nextKey = visible.map(a => `${a.agentId}:${a.status}:${a.currentTask || ''}`).sort().join('|');
+    const forceRebuild = existing.length === 0 || existing.length !== visible.length
+      || existing.some(s => !visible.find(a => a.agentId === s.id));
+
+    if (!forceRebuild && prevKey === nextKey) return;
+
     const cfg = activeConfig;
     const newSims: AgentSim[] = visible.map((agent, idx) => {
       const prev = existing.find(s => s.id === agent.agentId);

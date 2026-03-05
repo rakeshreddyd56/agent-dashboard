@@ -29,14 +29,28 @@ import type { Project } from '@/lib/types';
 const eventOffsets = new Map<string, number>();
 // Track progress.txt entries already inserted (by message hash)
 const progressSeen = new Map<string, Set<string>>();
+// Per-project sync lock to prevent concurrent syncs
+const syncLocks = new Map<string, boolean>();
 
 /** Clean up in-memory state for a removed project */
 export function cleanupProject(projectId: string) {
   eventOffsets.delete(projectId);
   progressSeen.delete(projectId);
+  syncLocks.delete(projectId);
 }
 
 export async function syncProject(project: Project) {
+  // Per-project lock: skip if already syncing this project
+  if (syncLocks.get(project.id)) return;
+  syncLocks.set(project.id, true);
+  try {
+    await _syncProjectInner(project);
+  } finally {
+    syncLocks.set(project.id, false);
+  }
+}
+
+async function _syncProjectInner(project: Project) {
   const { id: projectId, path: projectPath, coordinationPath } = project;
 
   // Guard: ensure project row exists before inserting FK-linked rows
