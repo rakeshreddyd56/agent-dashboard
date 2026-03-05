@@ -49,7 +49,12 @@ export type EventType =
   // Standup (Phase 4)
   | 'standup.generated'
   // Audit (Phase 2)
-  | 'audit.logged';
+  | 'audit.logged'
+  // Office (Phase 6)
+  | 'office.state_changed'
+  | 'office.research_complete'
+  | 'office.communication'
+  | 'office.memory_updated';
 
 export interface ServerEvent {
   type: EventType;

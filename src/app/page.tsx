@@ -12,7 +12,47 @@ import { NotificationPreview } from '@/components/dashboard/notification-preview
 import { PixelOffice } from '@/components/pixel-agents/pixel-office';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { MissionPanel } from '@/components/dashboard/mission-panel';
-import { Bot, ListChecks, TrendingUp, DollarSign } from 'lucide-react';
+import { Bot, ListChecks, TrendingUp, DollarSign, Building2 } from 'lucide-react';
+import { useOfficeStore } from '@/lib/store/office-store';
+import Link from 'next/link';
+
+function OfficeStatusCard() {
+  const state = useOfficeStore((s) => s.officeState);
+  const activeFloor = useOfficeStore((s) => s.activeFloor);
+  const floorStatuses = useOfficeStore((s) => s.floorStatuses);
+
+  const floorLabels = { 1: 'Research', 2: 'Development', 3: 'CI/CD' } as Record<number, string>;
+
+  return (
+    <Link href="/office">
+      <Card className="border-border/50 hover:border-[#6366f1]/30 transition-colors cursor-pointer">
+        <CardContent className="py-3 px-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Building2 className="h-5 w-5 text-[#6366f1]" />
+            <div>
+              <p className="text-sm font-medium">3-Floor Office</p>
+              <p className="text-xs text-muted-foreground">
+                {state === 'IDLE' ? 'Idle — Click to manage' : `${state} (Floor ${activeFloor || '?'})`}
+              </p>
+            </div>
+          </div>
+          <div className="flex gap-1">
+            {floorStatuses.map((f) => (
+              <div
+                key={f.floor}
+                className={`w-3 h-3 rounded-full ${
+                  f.status === 'active' ? 'bg-[#6366f1] animate-pulse' :
+                  f.status === 'complete' ? 'bg-[#3dba8a]' : 'bg-muted'
+                }`}
+                title={`Floor ${f.floor}: ${f.status}`}
+              />
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+    </Link>
+  );
+}
 
 export default function DashboardPage() {
   const allTasks = useTaskStore((s) => s.tasks);
@@ -83,6 +123,9 @@ export default function DashboardPage() {
           <PixelOffice agents={agents} projectName={projectName} />
         </CardContent>
       </Card>
+
+      {/* Office Status */}
+      <OfficeStatusCard />
 
       <AgentSummary />
 

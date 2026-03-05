@@ -34,6 +34,20 @@ export const AGENT_ROLES: { role: AgentRole; label: string; icon: string; color:
   { role: 'coordinator', label: 'Coordinator', icon: 'Users', color: '#24556f' },
   { role: 'supervisor', label: 'Rataa-1 (Ops)', icon: 'Eye', color: '#9333ea' },
   { role: 'supervisor-2', label: 'Rataa-2 (Quality)', icon: 'Eye', color: '#7c3aed' },
+  // Phase 6: 3-Floor Office — One Piece crew
+  { role: 'rataa-research', label: 'Robin-Research', icon: 'FlaskRound', color: '#6366f1' },
+  { role: 'rataa-frontend', label: 'Nami-Frontend', icon: 'MonitorSmartphone', color: '#8b5cf6' },
+  { role: 'rataa-backend', label: 'Franky-Backend', icon: 'Server', color: '#7c3aed' },
+  { role: 'rataa-ops', label: 'Luffy-Ops', icon: 'Rocket', color: '#a855f7' },
+  { role: 'frontend', label: 'Sanji-Frontend', icon: 'Palette', color: '#06b6d4' },
+  { role: 'backend-1', label: 'Zoro-Backend', icon: 'Database', color: '#0891b2' },
+  { role: 'backend-2', label: 'Law-Backend', icon: 'Database', color: '#0891b2' },
+  { role: 'tester-1', label: 'Smoker-Tester', icon: 'TestTube', color: '#10b981' },
+  { role: 'tester-2', label: 'Tashigi-Tester', icon: 'TestTube', color: '#10b981' },
+  { role: 'researcher-1', label: 'Chopper-Researcher', icon: 'BookOpen', color: '#f59e0b' },
+  { role: 'researcher-2', label: 'Brook-Researcher', icon: 'BookOpen', color: '#f59e0b' },
+  { role: 'researcher-3', label: 'Jinbe-Researcher', icon: 'BookOpen', color: '#f59e0b' },
+  { role: 'researcher-4', label: 'Carrot-Researcher', icon: 'BookOpen', color: '#f59e0b' },
 ];
 
 /* Agent status — mapped to Moltbook freshness/trust semantics
@@ -91,6 +105,47 @@ export const NAV_ITEMS = [
   { href: '/backlog', label: 'Backlog', icon: 'List' },
   { href: '/activity', label: 'Activity', icon: 'Activity' },
   { href: '/analytics', label: 'Analytics', icon: 'BarChart3' },
+  { href: '/office', label: 'Office', icon: 'Building2' },
   { href: '/standup', label: 'Standup', icon: 'FileText' },
   { href: '/settings', label: 'Settings', icon: 'Settings' },
 ] as const;
+
+export const OFFICE_CONFIG = {
+  enabled: true,
+  floors: { 1: 'Research & Ideation', 2: 'Development', 3: 'CI/CD & Deploy' } as Record<number, string>,
+  idleCheckIntervalMs: 5 * 60_000,
+  councilTimeoutMs: 5 * 60_000,
+  eodCommunicationHour: 22,
+  defaultCouncil: [
+    { name: 'GPT-4o', provider: 'openai', model: 'gpt-4o', role: 'chairman' as const },
+    { name: 'Claude Sonnet', provider: 'openrouter', model: 'anthropic/claude-sonnet-4-6', role: 'member' as const },
+    { name: 'Gemini 2 Flash', provider: 'openrouter', model: 'google/gemini-2.0-flash-001', role: 'member' as const },
+    { name: 'Llama 3.1 70B', provider: 'openrouter', model: 'meta-llama/llama-3.1-70b-instruct', role: 'member' as const },
+  ],
+  floorAgents: {
+    1: ['researcher-1', 'researcher-2', 'researcher-3', 'researcher-4', 'rataa-research'],
+    2: ['architect', 'frontend', 'backend-1', 'backend-2', 'tester-1', 'tester-2', 'rataa-frontend', 'rataa-backend'],
+    3: ['rataa-ops'],
+  } as Record<number, string[]>,
+} as const;
+
+/** One Piece character mapping — each agent gets a character name + role */
+export const AGENT_CHARACTERS: Record<string, { character: string; fullName: string; epithet: string; model: string }> = {
+  // Floor 3 — CI/CD & Deploy
+  'rataa-ops':       { character: 'Luffy',   fullName: 'Monkey D. Luffy',  epithet: 'Straw Hat Captain',        model: 'opus' },
+  // Floor 2 — Development
+  'rataa-frontend':  { character: 'Nami',    fullName: 'Nami',             epithet: 'Cat Burglar Navigator',    model: 'opus' },
+  'rataa-backend':   { character: 'Franky',  fullName: 'Cutty Flam',       epithet: 'Cyborg Shipwright',        model: 'opus' },
+  'architect':       { character: 'Usopp',   fullName: 'Usopp',            epithet: 'Sniper King Architect',    model: 'opus' },
+  'frontend':        { character: 'Sanji',   fullName: 'Vinsmoke Sanji',   epithet: 'Black Leg Chef',           model: 'sonnet' },
+  'backend-1':       { character: 'Zoro',    fullName: 'Roronoa Zoro',     epithet: 'Three-Sword Coder',        model: 'sonnet' },
+  'backend-2':       { character: 'Law',     fullName: 'Trafalgar D. Law', epithet: 'Surgeon of Death',         model: 'sonnet' },
+  'tester-1':        { character: 'Smoker',  fullName: 'Smoker',           epithet: 'White Hunter',             model: 'sonnet' },
+  'tester-2':        { character: 'Tashigi', fullName: 'Tashigi',          epithet: 'Meticulous Blade',         model: 'sonnet' },
+  // Floor 1 — Research & Ideation
+  'rataa-research':  { character: 'Robin',   fullName: 'Nico Robin',       epithet: 'Devil Child Archaeologist', model: 'opus' },
+  'researcher-1':    { character: 'Chopper', fullName: 'Tony Tony Chopper', epithet: 'Cotton Candy Lover',      model: 'gpt-4o' },
+  'researcher-2':    { character: 'Brook',   fullName: 'Brook',            epithet: 'Soul King',                model: 'claude-sonnet' },
+  'researcher-3':    { character: 'Jinbe',   fullName: 'Jinbe',            epithet: 'Knight of the Sea',        model: 'gemini-2-flash' },
+  'researcher-4':    { character: 'Carrot',  fullName: 'Carrot',           epithet: 'Sulong Warrior',           model: 'llama-3.1-70b' },
+};

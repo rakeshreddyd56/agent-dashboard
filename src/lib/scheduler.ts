@@ -1,6 +1,6 @@
 import { db, schema } from '@/lib/db';
 import { eq, lt } from 'drizzle-orm';
-import { AUTO_RELAY_CONFIG } from '@/lib/constants';
+import { AUTO_RELAY_CONFIG, OFFICE_CONFIG } from '@/lib/constants';
 
 /**
  * Background Scheduler — Runs periodic tasks on a 60s tick loop.
@@ -71,6 +71,25 @@ export function initScheduler() {
     enabled: AUTO_RELAY_CONFIG.enabled,
   });
 
+  // Phase 6: Office floor management
+  tasks.set('office_cycle_check', {
+    name: 'Office Floor Cycle',
+    intervalMs: OFFICE_CONFIG.idleCheckIntervalMs,
+    lastRun: null,
+    nextRun: now + OFFICE_CONFIG.idleCheckIntervalMs,
+    running: false,
+    enabled: OFFICE_CONFIG.enabled && process.env.OFFICE_ENABLED !== 'false',
+  });
+
+  tasks.set('office_daily_comm', {
+    name: 'Office Daily Communication',
+    intervalMs: ONE_HOUR,
+    lastRun: null,
+    nextRun: now + ONE_HOUR,
+    running: false,
+    enabled: OFFICE_CONFIG.enabled && process.env.OFFICE_ENABLED !== 'false',
+  });
+
   tickTimer = setInterval(tick, TICK_INTERVAL);
 }
 
@@ -99,6 +118,12 @@ async function tick() {
           break;
         case 'auto_relay':
           result = await runAutoRelayTask();
+          break;
+        case 'office_cycle_check':
+          result = await runOfficeCycleCheck();
+          break;
+        case 'office_daily_comm':
+          result = await runOfficeDailyComm();
           break;
         default:
           result = { ok: true, message: 'Unknown task' };
@@ -207,6 +232,53 @@ async function runAutoRelayTask(): Promise<{ ok: boolean; message: string }> {
     };
   } catch (err) {
     return { ok: false, message: `Relay failed: ${err instanceof Error ? err.message : 'unknown'}` };
+  }
+}
+
+/** Run office cycle check for all active projects */
+async function runOfficeCycleCheck(): Promise<{ ok: boolean; message: string }> {
+  const activeProjects = db.select().from(schema.projects)
+    .where(eq(schema.projects.isActive, true)).all();
+
+  if (activeProjects.length === 0) {
+    return { ok: true, message: 'No active projects for office' };
+  }
+
+  try {
+    const { runOfficeCycle } = await import('@/lib/office/floor-managers');
+    const results: string[] = [];
+
+    for (const project of activeProjects) {
+      const result = await runOfficeCycle(project.id);
+      if (result.stateTransition) {
+        results.push(`${project.name}: ${result.stateTransition.from} → ${result.stateTransition.to}`);
+      }
+    }
+
+    return { ok: true, message: results.length > 0 ? results.join('; ') : 'No office transitions' };
+  } catch (err) {
+    return { ok: false, message: `Office cycle error: ${err instanceof Error ? err.message : 'unknown'}` };
+  }
+}
+
+/** Run office daily communication at EOD */
+async function runOfficeDailyComm(): Promise<{ ok: boolean; message: string }> {
+  const hour = new Date().getHours();
+  if (hour !== OFFICE_CONFIG.eodCommunicationHour) {
+    return { ok: true, message: 'Not EOD communication time' };
+  }
+
+  const activeProjects = db.select().from(schema.projects)
+    .where(eq(schema.projects.isActive, true)).all();
+
+  try {
+    const { runDailyCommunication } = await import('@/lib/office/floor-managers');
+    for (const project of activeProjects) {
+      await runDailyCommunication(project.id);
+    }
+    return { ok: true, message: `Daily comms sent for ${activeProjects.length} projects` };
+  } catch (err) {
+    return { ok: false, message: `Daily comm error: ${err instanceof Error ? err.message : 'unknown'}` };
   }
 }
 

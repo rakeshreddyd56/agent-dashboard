@@ -207,3 +207,67 @@ export const agentSystemPrompts = sqliteTable('agent_system_prompts', {
   generatedBy: text('generated_by').notNull().default('rataa'),
   createdAt: text('created_at').notNull(),
 });
+
+// Phase 6: 3-Floor Office — Research & Ideation
+export const researchSessions = sqliteTable('research_sessions', {
+  id: text('id').primaryKey(),
+  projectId: text('project_id').notNull().references(() => projects.id),
+  date: text('date').notNull(),
+  state: text('state').notNull().default('IDLE'),
+  topic: text('topic'),
+  gitAnalysis: text('git_analysis'),
+  councilResponses: text('council_responses'),
+  peerReviews: text('peer_reviews'),
+  synthesis: text('synthesis'),
+  selectedIdea: text('selected_idea'),
+  votes: text('votes'),
+  ideationPlan: text('ideation_plan'),
+  uiUxScreens: text('ui_ux_screens'),
+  triggeredAt: text('triggered_at'),
+  completedAt: text('completed_at'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
+export const officeMemory = sqliteTable('office_memory', {
+  id: text('id').primaryKey(),
+  projectId: text('project_id').notNull().references(() => projects.id),
+  floor: integer('floor').notNull(),
+  type: text('type').notNull(),
+  date: text('date').notNull(),
+  title: text('title').notNull(),
+  content: text('content').notNull(),
+  tags: text('tags').notNull().default('[]'),
+  source: text('source').notNull(),
+  importance: integer('importance').notNull().default(5),
+  filePath: text('file_path'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
+export const floorCommunications = sqliteTable('floor_communications', {
+  id: text('id').primaryKey(),
+  projectId: text('project_id').notNull().references(() => projects.id),
+  date: text('date').notNull(),
+  fromFloor: integer('from_floor').notNull(),
+  toFloor: integer('to_floor').notNull(),
+  fromAgent: text('from_agent').notNull(),
+  toAgent: text('to_agent').notNull(),
+  messageType: text('message_type').notNull(),
+  content: text('content').notNull(),
+  metadata: text('metadata'),
+  acknowledged: integer('acknowledged', { mode: 'boolean' }).notNull().default(false),
+  createdAt: text('created_at').notNull(),
+});
+
+export const councilMembers = sqliteTable('council_members', {
+  id: text('id').primaryKey(),
+  projectId: text('project_id').notNull().references(() => projects.id),
+  name: text('name').notNull(),
+  provider: text('provider').notNull(),
+  model: text('model').notNull(),
+  role: text('role').notNull().default('member'),
+  isActive: integer('is_active', { mode: 'boolean' }).notNull().default(true),
+  totalVotes: integer('total_votes').notNull().default(0),
+  createdAt: text('created_at').notNull(),
+});

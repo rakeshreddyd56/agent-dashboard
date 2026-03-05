@@ -270,6 +270,81 @@ function createDb() {
     );
     CREATE INDEX IF NOT EXISTS idx_prompts_project ON agent_system_prompts(project_id);
     CREATE INDEX IF NOT EXISTS idx_prompts_role ON agent_system_prompts(agent_role);
+
+    -- Phase 6: 3-Floor Office
+    CREATE TABLE IF NOT EXISTS research_sessions (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id),
+      date TEXT NOT NULL,
+      state TEXT NOT NULL DEFAULT 'IDLE',
+      topic TEXT,
+      git_analysis TEXT,
+      council_responses TEXT,
+      peer_reviews TEXT,
+      synthesis TEXT,
+      selected_idea TEXT,
+      votes TEXT,
+      ideation_plan TEXT,
+      ui_ux_screens TEXT,
+      triggered_at TEXT,
+      completed_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_research_project ON research_sessions(project_id);
+    CREATE INDEX IF NOT EXISTS idx_research_date ON research_sessions(date);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_research_project_date ON research_sessions(project_id, date);
+
+    CREATE TABLE IF NOT EXISTS office_memory (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id),
+      floor INTEGER NOT NULL,
+      type TEXT NOT NULL,
+      date TEXT NOT NULL,
+      title TEXT NOT NULL,
+      content TEXT NOT NULL,
+      tags TEXT NOT NULL DEFAULT '[]',
+      source TEXT NOT NULL,
+      importance INTEGER NOT NULL DEFAULT 5,
+      file_path TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_office_memory_project ON office_memory(project_id);
+    CREATE INDEX IF NOT EXISTS idx_office_memory_floor ON office_memory(floor);
+    CREATE INDEX IF NOT EXISTS idx_office_memory_type ON office_memory(type);
+    CREATE INDEX IF NOT EXISTS idx_office_memory_date ON office_memory(date);
+
+    CREATE TABLE IF NOT EXISTS floor_communications (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id),
+      date TEXT NOT NULL,
+      from_floor INTEGER NOT NULL,
+      to_floor INTEGER NOT NULL,
+      from_agent TEXT NOT NULL,
+      to_agent TEXT NOT NULL,
+      message_type TEXT NOT NULL,
+      content TEXT NOT NULL,
+      metadata TEXT,
+      acknowledged INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_floor_comms_project ON floor_communications(project_id);
+    CREATE INDEX IF NOT EXISTS idx_floor_comms_date ON floor_communications(date);
+    CREATE INDEX IF NOT EXISTS idx_floor_comms_floors ON floor_communications(from_floor, to_floor);
+
+    CREATE TABLE IF NOT EXISTS council_members (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id),
+      name TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      model TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'member',
+      is_active INTEGER NOT NULL DEFAULT 1,
+      total_votes INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_council_project ON council_members(project_id);
   `);
 
   // Purge analytics snapshots older than 30 days

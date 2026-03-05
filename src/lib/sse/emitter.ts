@@ -40,6 +40,11 @@ const EVENT_TYPE_MAP: Record<string, SSEEventType> = {
   'pipeline.step_completed': 'pipeline:update',
   'pipeline.completed': 'pipeline:update',
   'standup.generated': 'standup:new',
+  // Phase 6: Office
+  'office.state_changed': 'office:update',
+  'office.research_complete': 'office:research',
+  'office.communication': 'office:communication',
+  'office.memory_updated': 'office:memory',
 };
 
 class SSEEmitter {

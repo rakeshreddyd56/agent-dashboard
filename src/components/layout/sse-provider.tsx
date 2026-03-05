@@ -8,6 +8,7 @@ import { useEventStore } from '@/lib/store/event-store';
 import { useAnalyticsStore } from '@/lib/store/analytics-store';
 import { useMessageStore } from '@/lib/store/message-store';
 import { useNotificationStore } from '@/lib/store/notification-store';
+import { useOfficeStore } from '@/lib/store/office-store';
 
 type SSEState = 'connecting' | 'connected' | 'disconnected';
 
@@ -89,6 +90,22 @@ function handleSSEMessage(e: MessageEvent) {
         if (msg.data) useNotificationStore.getState().addNotification(msg.data);
         break;
       case 'notification:read':
+        break;
+      // Phase 6: Office events
+      case 'office:update':
+        if (msg.data?.state) useOfficeStore.getState().setOfficeState(msg.data.state);
+        if (msg.data?.activeFloor !== undefined) useOfficeStore.getState().setActiveFloor(msg.data.activeFloor);
+        break;
+      case 'office:research':
+        if (msg.data?.session) useOfficeStore.getState().setCurrentSession(msg.data.session);
+        break;
+      case 'office:communication':
+        if (msg.data) useOfficeStore.getState().addCommunication(msg.data);
+        break;
+      case 'office:memory':
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('office-memory-updated'));
+        }
         break;
     }
   } catch {

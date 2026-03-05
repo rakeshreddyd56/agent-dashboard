@@ -1,6 +1,9 @@
 // Core domain types for the Multi-Agent Dashboard
 
-export type AgentRole = 'architect' | 'coder' | 'coder-2' | 'reviewer' | 'tester' | 'security-auditor' | 'devops' | 'coordinator' | 'supervisor' | 'supervisor-2';
+export type AgentRole = 'architect' | 'coder' | 'coder-2' | 'reviewer' | 'tester' | 'security-auditor' | 'devops' | 'coordinator' | 'supervisor' | 'supervisor-2'
+  | 'rataa-research' | 'rataa-frontend' | 'rataa-backend' | 'rataa-ops'
+  | 'frontend' | 'backend-1' | 'backend-2' | 'tester-1' | 'tester-2'
+  | 'researcher-1' | 'researcher-2' | 'researcher-3' | 'researcher-4';
 
 export type AgentStatus = 'initializing' | 'planning' | 'working' | 'blocked' | 'reviewing' | 'completed' | 'idle' | 'offline';
 
@@ -10,7 +13,7 @@ export type TaskPriority = 'P0' | 'P1' | 'P2' | 'P3';
 
 export type EventLevel = 'info' | 'warning' | 'error' | 'success' | 'debug';
 
-export type TaskSource = 'coordination' | 'dashboard' | 'tasks_md';
+export type TaskSource = 'coordination' | 'dashboard' | 'tasks_md' | 'office';
 
 export interface Project {
   id: string;
@@ -119,7 +122,12 @@ export type SSEEventType =
   | 'notification:read'
   | 'review:update'
   | 'pipeline:update'
-  | 'standup:new';
+  | 'standup:new'
+  // Phase 6: Office
+  | 'office:update'
+  | 'office:communication'
+  | 'office:memory'
+  | 'office:research';
 
 export interface SSEMessage {
   type: SSEEventType;
@@ -151,4 +159,109 @@ export interface DashboardStats {
   tasksInProgress: number;
   completionRate: number;
   estimatedCost: number;
+}
+
+// Phase 6: 3-Floor Office types
+export type FloorNumber = 1 | 2 | 3;
+
+export type OfficeState =
+  | 'IDLE' | 'CLONING' | 'ANALYZING' | 'RESEARCHING' | 'REVIEWING'
+  | 'SYNTHESIZING' | 'PLANNING' | 'DELEGATING' | 'DEVELOPING'
+  | 'TESTING' | 'BUILDING' | 'DEPLOYING' | 'COMPLETE';
+
+export type MemoryType = 'daily_log' | 'long_term' | 'insight' | 'soul' | 'user_pref';
+
+export type FloorMessageType =
+  | 'ideation_handoff' | 'architecture_proposal' | 'architecture_feedback'
+  | 'plan_finalized' | 'tickets_created' | 'build_request'
+  | 'deploy_status' | 'daily_summary';
+
+export interface ResearchSession {
+  id: string;
+  projectId: string;
+  date: string;
+  state: OfficeState;
+  topic?: string;
+  gitAnalysis?: string;
+  councilResponses?: string;
+  peerReviews?: string;
+  synthesis?: string;
+  selectedIdea?: string;
+  votes?: string;
+  ideationPlan?: string;
+  uiUxScreens?: string;
+  triggeredAt?: string;
+  completedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OfficeMemoryEntry {
+  id: string;
+  projectId: string;
+  floor: FloorNumber;
+  type: MemoryType;
+  date: string;
+  title: string;
+  content: string;
+  tags: string[];
+  source: string;
+  importance: number;
+  filePath?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FloorCommunication {
+  id: string;
+  projectId: string;
+  date: string;
+  fromFloor: FloorNumber;
+  toFloor: FloorNumber;
+  fromAgent: string;
+  toAgent: string;
+  messageType: FloorMessageType;
+  content: string;
+  metadata?: string;
+  acknowledged: boolean;
+  createdAt: string;
+}
+
+export interface CouncilMember {
+  id: string;
+  projectId: string;
+  name: string;
+  provider: string;
+  model: string;
+  role: 'member' | 'chairman';
+  isActive: boolean;
+  totalVotes: number;
+  createdAt: string;
+}
+
+export interface ResearchIdea {
+  title: string;
+  description: string;
+  viralPotential: string;
+  mvpScope: string;
+  uiScreens: string[];
+  proposedBy: string;
+  averageScore?: number;
+}
+
+export interface CouncilVote {
+  memberId: string;
+  memberName: string;
+  ideaIndex: number;
+  score: number;
+  reasoning: string;
+}
+
+export interface GitProjectAnalysis {
+  repoName: string;
+  description: string;
+  techStack: string[];
+  recentCommits: string[];
+  fileStructure: string;
+  currentVersion: string;
 }
