@@ -10,9 +10,10 @@ import { IdeaCard } from '@/components/office/idea-card';
 import { MemoryBrowser } from '@/components/office/memory-browser';
 import { CommunicationTimeline } from '@/components/office/communication-timeline';
 import { SoulEditor } from '@/components/office/soul-editor';
+import { RataaChatPanel } from '@/components/office/rataa-chat-panel';
 import type { OfficeState, FloorNumber, ResearchIdea, CouncilVote } from '@/lib/types';
 
-const TABS = ['Floors', 'Research', 'Memory', 'Communications'] as const;
+const TABS = ['Floors', 'Rataa Chat', 'Research', 'Memory', 'Communications'] as const;
 type Tab = typeof TABS[number];
 
 export default function OfficePage() {
@@ -142,6 +143,44 @@ export default function OfficePage() {
                 <p className="text-xs text-muted-foreground mt-1">Active Floor: {store.activeFloor}</p>
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'Rataa Chat' && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <RataaChatPanel />
+          <div className="space-y-4">
+            <div className="bg-card border border-border rounded-lg p-4">
+              <h3 className="text-sm font-semibold mb-3">Floor Rataas</h3>
+              <div className="space-y-3 text-xs">
+                <div className="flex items-center gap-3 p-2 rounded-md bg-accent/20">
+                  <span className="text-lg">📚</span>
+                  <div>
+                    <p className="font-medium text-[#f59e0b]">Robin — Rataa-Research</p>
+                    <p className="text-muted-foreground">Floor 1: Research & Ideation. Manages council deliberation, idea synthesis, and concept validation.</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 p-2 rounded-md bg-accent/20">
+                  <span className="text-lg">💻</span>
+                  <div>
+                    <p className="font-medium text-[#3b82f6]">Nami & Franky — Rataa-Dev</p>
+                    <p className="text-muted-foreground">Floor 2: Development. Architecture, frontend, backend, and testing coordination.</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 p-2 rounded-md bg-accent/20">
+                  <span className="text-lg">🚀</span>
+                  <div>
+                    <p className="font-medium text-[#a855f7]">Luffy — Rataa-Ops</p>
+                    <p className="text-muted-foreground">Floor 3: Operations. CI/CD, deployments, monitoring, and the final say.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <CommunicationTimeline
+              communications={store.communications.slice(0, 5)}
+              projectId={activeProjectId || ''}
+            />
           </div>
         </div>
       )}
