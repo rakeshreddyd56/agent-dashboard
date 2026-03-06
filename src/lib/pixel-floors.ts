@@ -18,6 +18,8 @@ export interface FloorConfig {
   };
   wallLabel: string;
   supervisorDesks: Vec[];
+  /** Maps agent role/id → desk index in deskTiles. Ensures deterministic seating. */
+  deskAssignments: Record<string, number>;
 }
 
 const ROWS = 14;
@@ -50,13 +52,13 @@ function markCells(grid: number[][], cells: Vec[], value: number) {
 function buildFloor1(): FloorConfig {
   const grid = makeGrid();
 
-  // Semicircle desks around central council table
+  // Semicircle desks: index 0=Robin, 1=Chopper, 2=Brook, 3=Jinbe, 4=Carrot
   const deskTiles: Vec[] = [
-    { x: 5, y: 3 },   // Robin
-    { x: 3, y: 5 },   // Chopper
-    { x: 7, y: 5 },   // Brook
-    { x: 3, y: 8 },   // Jinbe
-    { x: 7, y: 8 },   // Carrot
+    { x: 5, y: 3 },   // 0: Robin (rataa-research) — center front
+    { x: 3, y: 5 },   // 1: Chopper (researcher-1) — left mid
+    { x: 7, y: 5 },   // 2: Brook (researcher-2) — right mid
+    { x: 3, y: 8 },   // 3: Jinbe (researcher-3) — left back
+    { x: 7, y: 8 },   // 4: Carrot (researcher-4) — right back
   ];
   markCells(grid, deskTiles, 2);
   // Chairs below desks
@@ -139,6 +141,13 @@ function buildFloor1(): FloorConfig {
     },
     wallLabel: 'RESEARCH LAB',
     supervisorDesks: [],
+    deskAssignments: {
+      'rataa-research': 0,  // Robin — center front desk
+      'researcher-1': 1,    // Chopper — left mid
+      'researcher-2': 2,    // Brook — right mid
+      'researcher-3': 3,    // Jinbe — left back
+      'researcher-4': 4,    // Carrot — right back
+    },
   };
 }
 
@@ -151,10 +160,16 @@ function buildFloor1(): FloorConfig {
 function buildFloor2(): FloorConfig {
   const grid = makeGrid();
 
-  // 2 rows of 4 desks
+  // 2 rows of 4: leads in front, devs + testers in back
   const deskTiles: Vec[] = [
-    { x: 3, y: 3 }, { x: 6, y: 3 }, { x: 9, y: 3 }, { x: 12, y: 3 },
-    { x: 3, y: 7 }, { x: 6, y: 7 }, { x: 9, y: 7 }, { x: 12, y: 7 },
+    { x: 3, y: 3 },   // 0: Nami (rataa-frontend) — front-left lead
+    { x: 6, y: 3 },   // 1: Franky (rataa-backend) — front-center-left lead
+    { x: 9, y: 3 },   // 2: Usopp (architect) — front-center-right
+    { x: 12, y: 3 },  // 3: Sanji (frontend) — front-right
+    { x: 3, y: 7 },   // 4: Zoro (backend-1) — back-left
+    { x: 6, y: 7 },   // 5: Law (backend-2) — back-center-left
+    { x: 9, y: 7 },   // 6: Smoker (tester-1) — back-center-right
+    { x: 12, y: 7 },  // 7: Tashigi (tester-2) — back-right
   ];
   markCells(grid, deskTiles, 2);
   const chairs = deskTiles.map(d => ({ x: d.x, y: d.y + 1 }));
@@ -219,6 +234,16 @@ function buildFloor2(): FloorConfig {
     },
     wallLabel: 'DEV FLOOR',
     supervisorDesks: [],
+    deskAssignments: {
+      'rataa-frontend': 0,  // Nami — front-left lead desk (dual monitor)
+      'rataa-backend': 1,   // Franky — front-center-left lead desk (dual monitor)
+      'architect': 2,       // Usopp — front-center-right
+      'frontend': 3,        // Sanji — front-right
+      'backend-1': 4,       // Zoro — back-left
+      'backend-2': 5,       // Law — back-center-left
+      'tester-1': 6,        // Smoker — back-center-right
+      'tester-2': 7,        // Tashigi — back-right
+    },
   };
 }
 
@@ -305,6 +330,9 @@ function buildFloor3(): FloorConfig {
     },
     wallLabel: 'OPS CENTER',
     supervisorDesks: [],
+    deskAssignments: {
+      'rataa-ops': 0,  // Luffy — command desk
+    },
   };
 }
 

@@ -81,6 +81,18 @@ for (let r = 2; r <= 5; r++) {
 
 const SUPERVISOR_DESK: Vec = { x: 17, y: 10 };
 const SUPERVISOR_2_DESK: Vec = { x: 16, y: 10 };
+
+/** All-floors desk assignment: each agent role → desk index in DESK_TILES */
+const ALL_FLOORS_DESK_MAP: Record<string, number> = {
+  // Row 1 (y=3): leads + architect
+  'rataa-frontend': 0, 'rataa-backend': 1, 'architect': 2, 'frontend': 3,
+  // Row 2 (y=7): backend + testers
+  'backend-1': 4, 'backend-2': 5, 'tester-1': 6, 'tester-2': 7,
+  // Row 3 (y=11): researchers
+  'rataa-research': 8, 'researcher-1': 9, 'researcher-2': 10, 'researcher-3': 11,
+  // Overflow
+  'researcher-4': 8, 'rataa-ops': 9,
+};
 if (LAYOUT[10]) { LAYOUT[10][16] = 4; LAYOUT[10][17] = 2; LAYOUT[10][18] = 4; }
 if (LAYOUT[11]) LAYOUT[11][17] = 3;
 
@@ -113,17 +125,30 @@ const DEFAULT_COLORS = {
   wallTrim: '#4a3828', accent: '#c8a87a',
 };
 
-/* ───────── character mapping ───────── */
+/* ───────── character sprite mapping (char_0..char_5) ───────── */
 const CHAR_MAP: Record<string, number> = {
-  architect: 0, 'coder-1': 1, coder: 1, 'coder-2': 2,
+  // Legacy roles
+  'coder-1': 1, coder: 1, 'coder-2': 2,
   reviewer: 3, tester: 4, 'security-auditor': 5, security: 5,
   devops: 0, coordinator: 3, supervisor: 5, 'supervisor-2': 5,
   'ui-builder': 2, 'ui-polish': 4, 'ui-tester': 1,
-  // One Piece crew
-  'rataa-research': 3, 'rataa-frontend': 2, 'rataa-backend': 0, 'rataa-ops': 1,
-  frontend: 4, 'backend-1': 0, 'backend-2': 5,
-  'tester-1': 3, 'tester-2': 4,
-  'researcher-1': 1, 'researcher-2': 2, 'researcher-3': 0, 'researcher-4': 5,
+  // Floor 1 — Research Lab
+  'rataa-research': 3,  // Robin
+  'researcher-1': 1,    // Chopper
+  'researcher-2': 5,    // Brook
+  'researcher-3': 0,    // Jinbe
+  'researcher-4': 4,    // Carrot
+  // Floor 2 — Dev Office
+  'rataa-frontend': 2,  // Nami
+  'rataa-backend': 0,   // Franky
+  architect: 4,         // Usopp
+  frontend: 1,          // Sanji
+  'backend-1': 3,       // Zoro
+  'backend-2': 5,       // Law
+  'tester-1': 0,        // Smoker
+  'tester-2': 2,        // Tashigi
+  // Floor 3 — Ops Center
+  'rataa-ops': 1,       // Luffy
 };
 
 const STATUS_COLOR: Record<string, string> = {
@@ -299,6 +324,7 @@ export function PixelOffice({ agents, compact, projectName, floorId = 'all' }: P
         colors: DEFAULT_COLORS,
         wallLabel: '',
         supervisorDesks: [SUPERVISOR_DESK, SUPERVISOR_2_DESK],
+        deskAssignments: ALL_FLOORS_DESK_MAP,
       };
     }
     return FLOOR_CONFIGS[floorId as 1 | 2 | 3];
@@ -384,15 +410,18 @@ export function PixelOffice({ agents, compact, projectName, floorId = 'all' }: P
     const cfg = activeConfig;
     const newSims: AgentSim[] = visible.map((agent, idx) => {
       const prev = existing.find(s => s.id === agent.agentId);
+
+      // Deterministic desk assignment: look up by agentId first, then role, then fallback to index
       let desk: Vec;
-      if (floorId === 'all') {
-        desk = agent.role === 'supervisor' ? SUPERVISOR_DESK
-          : agent.role === 'supervisor-2' ? SUPERVISOR_2_DESK
-          : DESK_TILES[idx % DESK_TILES.length];
+      if (agent.role === 'supervisor') {
+        desk = SUPERVISOR_DESK;
+      } else if (agent.role === 'supervisor-2') {
+        desk = SUPERVISOR_2_DESK;
       } else {
-        desk = cfg.supervisorDesks[0] && (agent.role === 'supervisor' || agent.role === 'supervisor-2')
-          ? cfg.supervisorDesks[idx % cfg.supervisorDesks.length]
-          : cfg.deskTiles[idx % cfg.deskTiles.length];
+        const assignedIdx = cfg.deskAssignments[agent.agentId]
+          ?? cfg.deskAssignments[agent.role]
+          ?? (idx % cfg.deskTiles.length);
+        desk = cfg.deskTiles[assignedIdx % cfg.deskTiles.length];
       }
       const chairTile = { x: desk.x, y: desk.y + 1 };
 
