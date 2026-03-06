@@ -30,12 +30,12 @@ export function seedDemoData() {
   // Seed agents
   const agentDefs: { role: AgentRole; status: AgentStatus; model: string; task?: string }[] = [
     { role: 'architect', status: 'planning', model: 'claude-opus-4-6', task: 'Design API schema' },
-    { role: 'coder', status: 'working', model: 'claude-sonnet-4-6', task: 'Implement user auth' },
-    { role: 'coder-2', status: 'working', model: 'claude-sonnet-4-6', task: 'Build payment integration' },
-    { role: 'reviewer', status: 'reviewing', model: 'claude-opus-4-6', task: 'Review PR #42' },
-    { role: 'tester', status: 'working', model: 'claude-sonnet-4-6', task: 'Write e2e tests for auth' },
-    { role: 'security-auditor', status: 'idle', model: 'claude-opus-4-6' },
-    { role: 'devops', status: 'completed', model: 'claude-haiku-4-5', task: 'Set up CI pipeline' },
+    { role: 'frontend', status: 'working', model: 'claude-sonnet-4-6', task: 'Build dashboard UI' },
+    { role: 'backend-1', status: 'working', model: 'claude-sonnet-4-6', task: 'Implement user auth' },
+    { role: 'backend-2', status: 'working', model: 'claude-sonnet-4-6', task: 'Build payment integration' },
+    { role: 'rataa-frontend', status: 'reviewing', model: 'claude-opus-4-6', task: 'Review PR #42' },
+    { role: 'tester-1', status: 'working', model: 'claude-sonnet-4-6', task: 'Write e2e tests for auth' },
+    { role: 'rataa-ops', status: 'completed', model: 'claude-opus-4-6', task: 'Set up CI pipeline' },
   ];
 
   for (let i = 0; i < agentDefs.length; i++) {
@@ -62,13 +62,13 @@ export function seedDemoData() {
   const taskDefs: { title: string; status: TaskStatus; priority: TaskPriority; agent?: string; tags: string[] }[] = [
     { title: 'Set up monorepo structure', status: 'DONE', priority: 'P0', agent: 'architect', tags: ['setup'] },
     { title: 'Design database schema', status: 'DONE', priority: 'P0', agent: 'architect', tags: ['database'] },
-    { title: 'Implement user authentication', status: 'IN_PROGRESS', priority: 'P0', agent: 'coder', tags: ['auth', 'security'] },
-    { title: 'Build payment integration', status: 'IN_PROGRESS', priority: 'P1', agent: 'coder-2', tags: ['payments'] },
+    { title: 'Implement user authentication', status: 'IN_PROGRESS', priority: 'P0', agent: 'backend-1', tags: ['auth', 'security'] },
+    { title: 'Build payment integration', status: 'IN_PROGRESS', priority: 'P1', agent: 'backend-2', tags: ['payments'] },
     { title: 'Create admin dashboard UI', status: 'TODO', priority: 'P1', tags: ['frontend', 'admin'] },
     { title: 'Write API documentation', status: 'TODO', priority: 'P2', tags: ['docs'] },
-    { title: 'Review authentication PR', status: 'REVIEW', priority: 'P0', agent: 'reviewer', tags: ['auth', 'review'] },
-    { title: 'E2E tests for auth flow', status: 'TESTING', priority: 'P1', agent: 'tester', tags: ['testing', 'auth'] },
-    { title: 'Set up CI/CD pipeline', status: 'DONE', priority: 'P1', agent: 'devops', tags: ['devops', 'ci'] },
+    { title: 'Review authentication PR', status: 'REVIEW', priority: 'P0', agent: 'rataa-frontend', tags: ['auth', 'review'] },
+    { title: 'E2E tests for auth flow', status: 'TESTING', priority: 'P1', agent: 'tester-1', tags: ['testing', 'auth'] },
+    { title: 'Set up CI/CD pipeline', status: 'DONE', priority: 'P1', agent: 'rataa-ops', tags: ['devops', 'ci'] },
     { title: 'Security audit: JWT implementation', status: 'BACKLOG', priority: 'P0', tags: ['security'] },
     { title: 'Add rate limiting middleware', status: 'BACKLOG', priority: 'P1', tags: ['security', 'api'] },
     { title: 'Implement WebSocket notifications', status: 'TODO', priority: 'P2', tags: ['realtime'] },
@@ -101,17 +101,17 @@ export function seedDemoData() {
   // Seed events
   const eventDefs: { level: EventLevel; agent?: string; message: string }[] = [
     { level: 'info', agent: 'architect', message: 'Started planning session' },
-    { level: 'success', agent: 'coder', message: 'Completed user model implementation' },
-    { level: 'info', agent: 'coder', message: 'Starting authentication module' },
-    { level: 'warning', agent: 'reviewer', message: 'Found potential SQL injection in query builder' },
-    { level: 'success', agent: 'devops', message: 'CI pipeline configured and passing' },
-    { level: 'info', agent: 'tester', message: 'Running test suite: auth module' },
-    { level: 'error', agent: 'coder-2', message: 'Payment API integration test failing - timeout' },
-    { level: 'info', agent: 'coder-2', message: 'Retrying with increased timeout' },
-    { level: 'success', agent: 'coder-2', message: 'Payment integration tests passing' },
+    { level: 'success', agent: 'backend-1', message: 'Completed user model implementation' },
+    { level: 'info', agent: 'backend-1', message: 'Starting authentication module' },
+    { level: 'warning', agent: 'rataa-frontend', message: 'Found potential SQL injection in query builder' },
+    { level: 'success', agent: 'rataa-ops', message: 'CI pipeline configured and passing' },
+    { level: 'info', agent: 'tester-1', message: 'Running test suite: auth module' },
+    { level: 'error', agent: 'backend-2', message: 'Payment API integration test failing - timeout' },
+    { level: 'info', agent: 'backend-2', message: 'Retrying with increased timeout' },
+    { level: 'success', agent: 'backend-2', message: 'Payment integration tests passing' },
     { level: 'info', agent: 'architect', message: 'Updated API schema with pagination support' },
-    { level: 'warning', agent: 'security-auditor', message: 'JWT secret should use minimum 256-bit key' },
-    { level: 'success', agent: 'tester', message: '42/42 tests passing for user module' },
+    { level: 'warning', agent: 'rataa-research', message: 'Research findings suggest alternative auth approach' },
+    { level: 'success', agent: 'tester-1', message: '42/42 tests passing for user module' },
   ];
 
   for (let i = 0; i < eventDefs.length; i++) {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { AgentGrid } from '@/components/agents/agent-grid';
 import { PixelOffice } from '@/components/pixel-agents/pixel-office';
 import { CommunicationGraph } from '@/components/agents/communication-graph';
@@ -16,23 +16,85 @@ import { SkeletonAgentGrid } from '@/components/shared/skeletons';
 import { FloorSelector } from '@/components/shared/floor-selector';
 import { useOfficeStore } from '@/lib/store/office-store';
 import { filterAgentsByFloor } from '@/lib/utils/floor-filter';
-import { Rocket, RotateCcw, Eye } from 'lucide-react';
+import { useSmartPoll } from '@/lib/hooks/use-smart-poll';
+import { OFFICE_CONFIG, AGENT_CHARACTERS } from '@/lib/constants';
+import { Rocket, RotateCcw, Eye, RefreshCw } from 'lucide-react';
+import type { AgentSnapshot, AgentRole, AgentStatus } from '@/lib/types';
+
+/** Create placeholder agents for a floor when none exist in the DB */
+function getFloorPlaceholders(floor: 'all' | 1 | 2 | 3, projectId: string, existingIds: Set<string>): AgentSnapshot[] {
+  if (floor === 'all') return [];
+  const floorRoles = OFFICE_CONFIG.floorAgents[floor] || [];
+  const placeholders: AgentSnapshot[] = [];
+  for (const roleId of floorRoles) {
+    if (existingIds.has(roleId)) continue;
+    const charInfo = AGENT_CHARACTERS[roleId];
+    placeholders.push({
+      id: `${projectId}-${roleId}`,
+      projectId,
+      agentId: roleId,
+      role: roleId as AgentRole,
+      status: 'offline' as AgentStatus,
+      currentTask: undefined,
+      model: charInfo?.model,
+      sessionStart: undefined,
+      lastHeartbeat: undefined,
+      lockedFiles: [],
+      progress: undefined,
+      estimatedCost: undefined,
+      createdAt: new Date().toISOString(),
+    });
+  }
+  return placeholders;
+}
 
 export default function AgentsPage() {
   const allAgents = useAgentStore((s) => s.agents);
+  const setAgents = useAgentStore((s) => s.setAgents);
   const events = useEventStore((s) => s.events);
   const activeProjectId = useProjectStore((s) => s.activeProjectId);
   const projectName = useProjectStore((s) => s.projects.find((p) => p.id === s.activeProjectId)?.name || 'Agent Dashboard');
   const viewFloor = useOfficeStore((s) => s.viewFloor);
   const projectAgents = activeProjectId ? allAgents.filter((a) => a.projectId === activeProjectId) : allAgents;
-  const agents = filterAgentsByFloor(projectAgents, viewFloor);
+  const floorAgents = filterAgentsByFloor(projectAgents, viewFloor);
+
+  // If viewing a specific floor and no agents exist for it, show placeholders
+  const agents = useMemo(() => {
+    if (viewFloor === 'all' || floorAgents.length > 0) return floorAgents;
+    if (!activeProjectId) return floorAgents;
+    const existingIds = new Set(projectAgents.map((a) => a.agentId));
+    const placeholders = getFloorPlaceholders(viewFloor, activeProjectId, existingIds);
+    return placeholders.length > 0 ? placeholders : floorAgents;
+  }, [viewFloor, floorAgents, activeProjectId, projectAgents]);
+
   const [launching, setLaunching] = useState(false);
   const [launchMsg, setLaunchMsg] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   const offlineCount = agents.filter((a) => a.status === 'offline' || a.status === 'completed').length;
   const activeCount = agents.filter((a) => ['working', 'planning', 'reviewing'].includes(a.status)).length;
-  const hasSupervisor = agents.some((a) => (a.role === 'supervisor' || a.role === 'supervisor-2') && a.status === 'working');
   const supervisorCount = agents.filter((a) => (a.role === 'supervisor' || a.role === 'supervisor-2') && a.status === 'working').length;
+
+  // Auto-refresh: poll agents every 5 seconds
+  const fetchAgents = useCallback(async () => {
+    if (!activeProjectId) return;
+    const res = await fetch(`/api/agents?projectId=${activeProjectId}`);
+    const data = await res.json();
+    if (data.agents) setAgents(data.agents);
+  }, [activeProjectId, setAgents]);
+
+  // Auto-poll every 5s (also works as SSE fallback)
+  useSmartPoll(fetchAgents, 5000, { pauseWhenSseConnected: false });
+
+  // Manual refresh handler
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await fetchAgents();
+    } finally {
+      setTimeout(() => setRefreshing(false), 400);
+    }
+  }, [fetchAgents]);
 
   const handleLaunchAll = async () => {
     if (!activeProjectId || launching) return;
@@ -117,6 +179,15 @@ export default function AgentsPage() {
         <h1 className="text-2xl font-bold">{projectName} Agents</h1>
         <div className="flex items-center gap-3">
           <FloorSelector />
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 w-7 p-0"
+            onClick={handleRefresh}
+            title="Refresh agents (auto-refreshes every 5s)"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+          </Button>
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <Badge variant="secondary" className="text-[10px]">{activeCount} active</Badge>
             <Badge variant="outline" className="text-[10px]">{offlineCount} idle</Badge>

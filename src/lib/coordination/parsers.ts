@@ -37,8 +37,12 @@ function generateId(): string {
 }
 
 const VALID_ROLES: Set<string> = new Set([
-  'architect', 'coder', 'coder-2', 'reviewer', 'tester',
-  'security-auditor', 'devops', 'coordinator', 'supervisor', 'supervisor-2',
+  // Floor 1 — Research
+  'rataa-research', 'researcher-1', 'researcher-2', 'researcher-3', 'researcher-4',
+  // Floor 2 — Development
+  'rataa-frontend', 'rataa-backend', 'architect', 'frontend', 'backend-1', 'backend-2', 'tester-1', 'tester-2',
+  // Floor 3 — Ops
+  'rataa-ops', 'supervisor', 'supervisor-2',
 ]);
 
 const VALID_STATUSES: Set<string> = new Set([
@@ -74,7 +78,7 @@ export function parseRegistry(coordinationPath: string, projectId: string): Agen
     if (!entry || typeof entry !== 'object') continue;
     const e = entry as Record<string, unknown>;
 
-    const role = String(e.role || e.agent_role || 'coder');
+    const role = String(e.role || e.agent_role || 'architect');
     const agentId = String(e.id || e.agent_id || e.name || role);
 
     // Map real statuses to dashboard-known statuses
@@ -88,7 +92,7 @@ export function parseRegistry(coordinationPath: string, projectId: string): Agen
       id: `${projectId}-${agentId}`,
       projectId,
       agentId,
-      role: (VALID_ROLES.has(role) ? role : 'coder') as AgentRole,
+      role: (VALID_ROLES.has(role) ? role : 'architect') as AgentRole,
       status: finalStatus as AgentStatus,
       currentTask: (e.current_task || e.task) as string | undefined,
       model: e.model as string | undefined,
@@ -172,7 +176,7 @@ export function parseLocks(coordinationPath: string, projectId: string): FileLoc
       projectId,
       filePath,
       agentId,
-      agentRole: (VALID_ROLES.has(String(e.agent_role || e.role)) ? e.agent_role || e.role : 'coder') as AgentRole,
+      agentRole: (VALID_ROLES.has(String(e.agent_role || e.role)) ? e.agent_role || e.role : 'architect') as AgentRole,
       lockedAt: String(e.locked_at || e.timestamp || new Date().toISOString()),
     });
   }

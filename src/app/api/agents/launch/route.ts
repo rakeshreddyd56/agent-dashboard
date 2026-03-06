@@ -7,6 +7,7 @@ import path from 'path';
 import { upsertProjectAgent } from '@/lib/db/project-queries';
 import { projectTablesExist, createProjectTables } from '@/lib/db/dynamic-tables';
 import { eventBus } from '@/lib/events/event-bus';
+import { getSpawnEnv } from '@/lib/sdk/spawn-env';
 
 // Prevent duplicate concurrent launches
 const launchingLock = new Set<string>();
@@ -26,45 +27,81 @@ function sanitizeForShell(text: string): string {
 
 // Role-specific capabilities and focus areas for mission-aware prompts
 const ROLE_CAPABILITIES: Record<string, { focus: string; skills: string; collaboration: string }> = {
+  // ═══ Floor 1 — Research Lab ═══
+  // Team: rataa-research (lead), researcher-1, researcher-2, researcher-3, researcher-4
+  'rataa-research': {
+    focus: 'Research coordination, synthesis of findings, and directing the research team',
+    skills: 'Literature review, research planning, cross-referencing sources, synthesizing insights, creating research briefs, creating tasks from research findings',
+    collaboration: 'YOU LEAD Floor 1 (Research Lab). Your team: researcher-1 (Chopper/GPT-4o), researcher-2 (Brook/Claude), researcher-3 (Jinbe/Gemini), researcher-4 (Carrot/Llama). Send messages to each researcher with specific sub-tasks. Collect and synthesize their findings. CREATE TASKS on the dashboard board for actionable items from research (use create-task API). Move tasks to IN_PROGRESS when working, REVIEW when done. Report consolidated insights to rataa-frontend and rataa-backend on Floor 2 via send-message. Coordinate with supervisor on Floor 3 for task status.',
+  },
+  'researcher-1': {
+    focus: 'Deep research using GPT-4o, web search, and document analysis',
+    skills: 'Web research, API documentation analysis, competitive analysis, technical feasibility studies',
+    collaboration: 'You are on Floor 1 (Research Lab). Your lead is rataa-research (Robin). ALWAYS use the dashboard API: check board for existing tasks, create new tasks for findings, move your tasks through statuses (TODO→IN_PROGRESS→REVIEW→DONE). Report findings via send-message to rataa-research. Coordinate with researcher-2, researcher-3, researcher-4 to avoid duplicate work.',
+  },
+  'researcher-2': {
+    focus: 'Research and analysis using Claude, focusing on code analysis and technical docs',
+    skills: 'Code analysis, technical documentation review, architecture research, best practices analysis',
+    collaboration: 'You are on Floor 1 (Research Lab). Your lead is rataa-research (Robin). ALWAYS use the dashboard API: check board for existing tasks, create new tasks for findings, move your tasks through statuses (TODO→IN_PROGRESS→REVIEW→DONE). Report findings via send-message to rataa-research. Coordinate with researcher-1, researcher-3, researcher-4.',
+  },
+  'researcher-3': {
+    focus: 'Research using Gemini, focusing on broad knowledge synthesis and multimodal analysis',
+    skills: 'Multi-source synthesis, trend analysis, technology comparison, visual documentation analysis',
+    collaboration: 'You are on Floor 1 (Research Lab). Your lead is rataa-research (Robin). ALWAYS use the dashboard API: check board for existing tasks, create new tasks for findings, move your tasks through statuses (TODO→IN_PROGRESS→REVIEW→DONE). Report findings via send-message to rataa-research. Coordinate with researcher-1, researcher-2, researcher-4.',
+  },
+  'researcher-4': {
+    focus: 'Research using Llama, focusing on open-source ecosystem and community insights',
+    skills: 'Open-source research, community analysis, package evaluation, ecosystem mapping',
+    collaboration: 'You are on Floor 1 (Research Lab). Your lead is rataa-research (Robin). ALWAYS use the dashboard API: check board for existing tasks, create new tasks for findings, move your tasks through statuses (TODO→IN_PROGRESS→REVIEW→DONE). Report findings via send-message to rataa-research. Coordinate with researcher-1, researcher-2, researcher-3.',
+  },
+  // ═══ Floor 2 — Dev Floor ═══
+  // Team: rataa-frontend (lead), rataa-backend (lead), architect, frontend, backend-1, backend-2, tester-1, tester-2
+  'rataa-frontend': {
+    focus: 'Frontend architecture, UI/UX coordination, and component design leadership',
+    skills: 'React/Next.js architecture, design systems, component patterns, state management, responsive design',
+    collaboration: 'YOU LEAD frontend on Floor 2 (Dev Floor). Your team: frontend (Sanji), tester-2 (Tashigi). Coordinate with rataa-backend (Franky) for API contracts. Send messages to your team with task assignments. Review frontend PRs. Message rataa-research on Floor 1 for research needs. Message rataa-ops on Floor 3 for deployment coordination.',
+  },
+  'rataa-backend': {
+    focus: 'Backend architecture, API design, and database coordination',
+    skills: 'API design, database schema, server architecture, performance optimization, security patterns',
+    collaboration: 'YOU LEAD backend on Floor 2 (Dev Floor). Your team: backend-1 (Zoro), backend-2 (Law), tester-1 (Smoker). Coordinate with rataa-frontend (Nami) for API contracts. Send messages to your team with task assignments. Message rataa-research on Floor 1 for research needs. Message rataa-ops on Floor 3 for deployment.',
+  },
   architect: {
     focus: 'System design, architecture decisions, technical specifications, and project structure',
     skills: 'Design patterns, API design, database schema, system decomposition, scalability planning',
-    collaboration: 'Create detailed technical specs and task breakdowns. Define interfaces between components. Review architectural decisions made by other agents.',
+    collaboration: 'You are on Floor 2 (Dev Floor). You report to both rataa-frontend and rataa-backend. Create technical specs and task breakdowns. Define interfaces between frontend and backend. Review architecture decisions. Send specs to rataa-frontend and rataa-backend via message.',
   },
-  coder: {
-    focus: 'Primary implementation of features, core business logic, and backend systems',
-    skills: 'Full-stack development, algorithm implementation, API endpoints, database operations',
-    collaboration: 'Implement tasks from the board. Write clean, tested code. Create new tickets for bugs found. Coordinate with reviewer and tester.',
+  frontend: {
+    focus: 'Frontend implementation, React components, and UI polish',
+    skills: 'React components, CSS/Tailwind, animations, accessibility, responsive layouts',
+    collaboration: 'You are on Floor 2 (Dev Floor). Your lead is rataa-frontend (Nami). Report progress via send-message to rataa-frontend. Coordinate with backend-1 and backend-2 on API integration. Ask tester-2 to validate your work.',
   },
-  'coder-2': {
-    focus: 'Secondary implementation, frontend components, UI/UX, and parallel development tracks',
-    skills: 'Frontend development, component architecture, state management, responsive design',
-    collaboration: 'Work on parallel tasks to coder. Focus on frontend/UI if coder handles backend. Avoid file conflicts by checking locked files.',
+  'backend-1': {
+    focus: 'Backend implementation, API endpoints, and business logic',
+    skills: 'API endpoints, database queries, business logic, middleware, authentication',
+    collaboration: 'You are on Floor 2 (Dev Floor). Your lead is rataa-backend (Franky). Report progress via send-message to rataa-backend. Coordinate with backend-2 to avoid file conflicts. Ask tester-1 to validate your work.',
   },
-  reviewer: {
-    focus: 'Code review, quality assurance, best practices enforcement, and standards compliance',
-    skills: 'Code review, security review, performance analysis, refactoring recommendations',
-    collaboration: 'Review completed work from coders. Create tickets for issues found. Move tasks to DONE after verification. Ensure code meets project standards.',
+  'backend-2': {
+    focus: 'Secondary backend work, data processing, and infrastructure code',
+    skills: 'Data pipelines, background jobs, caching, file processing, third-party integrations',
+    collaboration: 'You are on Floor 2 (Dev Floor). Your lead is rataa-backend (Franky). Report progress via send-message to rataa-backend. Coordinate with backend-1 to avoid file conflicts. Check locked files before editing shared code.',
   },
-  tester: {
-    focus: 'Testing strategy, test implementation, validation, and quality gates',
-    skills: 'Unit testing, integration testing, E2E testing, test coverage analysis, regression testing',
-    collaboration: 'Write and run tests for completed features. Create bug tickets for failures. Validate that tasks meet acceptance criteria before marking TESTED.',
+  'tester-1': {
+    focus: 'Test implementation, test coverage, and quality validation',
+    skills: 'Unit testing, integration testing, test coverage analysis, fixture creation, assertion patterns',
+    collaboration: 'You are on Floor 2 (Dev Floor). Your lead is rataa-backend (Franky). Write and run tests for backend-1 and backend-2 work. Report failures via send-message to rataa-backend and the failing agent. Create bug tickets for failures.',
   },
-  'security-auditor': {
-    focus: 'Security analysis, vulnerability detection, and security hardening',
-    skills: 'OWASP top 10, dependency auditing, auth/authz review, input validation, secure coding',
-    collaboration: 'Audit code for security vulnerabilities. Create P0/P1 tickets for critical issues. Review auth flows and data handling.',
+  'tester-2': {
+    focus: 'E2E testing, regression testing, and edge case validation',
+    skills: 'E2E testing, browser testing, edge cases, performance testing, regression suites',
+    collaboration: 'You are on Floor 2 (Dev Floor). Your lead is rataa-frontend (Nami). Write E2E and regression tests for frontend work. Report failures via send-message to rataa-frontend and the failing agent. Coordinate with tester-1 on shared test infrastructure.',
   },
-  devops: {
-    focus: 'Infrastructure, CI/CD, deployment, monitoring, and operational excellence',
-    skills: 'Docker, CI/CD pipelines, monitoring setup, deployment automation, environment management',
-    collaboration: 'Set up build and deploy pipelines. Configure environments. Create tickets for infrastructure needs.',
-  },
-  coordinator: {
-    focus: 'Team orchestration, task assignment, and workflow optimization',
-    skills: 'Task prioritization, resource allocation, bottleneck identification, workflow management',
-    collaboration: 'Monitor team progress. Reassign tasks when agents are blocked. Optimize parallel work streams.',
+  // ═══ Floor 3 — Ops Center ═══
+  // Team: rataa-ops (lead), supervisor, supervisor-2
+  'rataa-ops': {
+    focus: 'Operations coordination, deployment, monitoring, and infrastructure management',
+    skills: 'CI/CD, deployment automation, monitoring, log analysis, incident response, infrastructure as code',
+    collaboration: 'YOU LEAD Floor 3 (Ops Center). You handle deployments and infrastructure. Coordinate with supervisor (Rataa-1) for agent lifecycle and supervisor-2 (Rataa-2) for quality gates. Message rataa-frontend and rataa-backend on Floor 2 for deployment readiness. Message rataa-research on Floor 1 for infrastructure research needs.',
   },
 };
 
@@ -123,10 +160,31 @@ function generateMissionAwarePrompt(
 5. Create new tickets in TASKS.md for bugs or sub-tasks you discover
 6. Coordinate with other agents — check their status before modifying shared files`);
 
-  parts.push(`\n== DASHBOARD API ==
-Check board: curl -s '${dashboardUrl}/api/agent-actions?action=board-summary&projectId=${sanitizeForShell(projectId)}'
-Move task: curl -s -X POST ${dashboardUrl}/api/agent-actions -H 'Content-Type: application/json' -d '{"action":"move-task","projectId":"${sanitizeForShell(projectId)}","taskId":"TASK_ID","status":"DONE"}'
-Send message: curl -s -X POST ${dashboardUrl}/api/agent-actions -H 'Content-Type: application/json' -d '{"action":"send-message","projectId":"${sanitizeForShell(projectId)}","fromAgent":"${role}","toAgent":"AGENT","content":"MSG"}'`);
+  const pid = sanitizeForShell(projectId);
+  parts.push(`\n== DASHBOARD API (execute via Bash tool with curl) ==
+
+CHECK BOARD (task counts by status):
+  curl -s '${dashboardUrl}/api/agent-actions?action=board-summary&projectId=${pid}'
+
+LIST TASKS BY STATUS:
+  curl -s '${dashboardUrl}/api/agent-actions?action=list-tasks&projectId=${pid}&status=TODO'
+
+GET TASK DETAILS:
+  curl -s '${dashboardUrl}/api/agent-actions?action=get-task&projectId=${pid}&taskId=TASK_ID'
+
+CREATE TASK:
+  curl -s -X POST ${dashboardUrl}/api/agent-actions -H 'Content-Type: application/json' -d '{"action":"create-task","projectId":"${pid}","title":"TITLE","description":"DESC","status":"TODO","priority":"P1","agentId":"${role}"}'
+
+MOVE TASK STATUS (TODO, IN_PROGRESS, REVIEW, DONE, etc.):
+  curl -s -X POST ${dashboardUrl}/api/agent-actions -H 'Content-Type: application/json' -d '{"action":"move-task","projectId":"${pid}","taskId":"TASK_ID","status":"DONE","agentId":"${role}"}'
+
+COMMENT ON TASK:
+  curl -s -X POST ${dashboardUrl}/api/agent-actions -H 'Content-Type: application/json' -d '{"action":"comment-task","projectId":"${pid}","taskId":"TASK_ID","agentId":"${role}","content":"COMMENT"}'
+
+SEND MESSAGE TO AGENT:
+  curl -s -X POST ${dashboardUrl}/api/agent-actions -H 'Content-Type: application/json' -d '{"action":"send-message","projectId":"${pid}","fromAgent":"${role}","toAgent":"AGENT_ID","content":"MSG"}'
+
+IMPORTANT: You MUST use these API commands to create tasks, move tasks across the board, and communicate. Do NOT just edit TASKS.md directly — always use the API so the dashboard updates in real time.`);
 
   const prompt = parts.join('\n');
 
@@ -252,7 +310,7 @@ function generateRunnerScript(projectPath: string, role: string, projectName: st
   }
 
   const scriptPath = path.join(scriptsDir, `run-${role}.sh`);
-  if (fs.existsSync(scriptPath)) return scriptPath;
+  // Always regenerate to pick up prompt/mission changes
 
   const systemPromptLine = projectId
     ? getSystemPromptLine(projectPath, projectName, role, projectId)
@@ -325,23 +383,59 @@ function generateSupervisorScript(projectPath: string, projectName: string, proj
   const dashboardUrl = `http://localhost:${dashboardPort}`;
   // Shared commands for both supervisors
   const sharedCommands = `
-CHECK AGENTS:
-  curl -s ${dashboardUrl}/api/agent-actions?action=list-agents\\&projectId=${pid}
+=== VISIBILITY (read-only) ===
 
-CHECK BOARD:
-  curl -s ${dashboardUrl}/api/agent-actions?action=board-summary\\&projectId=${pid}
+FULL STATUS (all floors, all agents, all tasks — use this FIRST every cycle):
+  curl -s '${dashboardUrl}/api/agent-actions?action=full-status\\&projectId=${pid}'
+
+FLOOR STATUS (per-floor: agents + their tasks — floor=1 Research, 2 Dev, 3 Ops):
+  curl -s '${dashboardUrl}/api/agent-actions?action=floor-status\\&projectId=${pid}\\&floor=1'
+  curl -s '${dashboardUrl}/api/agent-actions?action=floor-status\\&projectId=${pid}\\&floor=2'
+  curl -s '${dashboardUrl}/api/agent-actions?action=floor-status\\&projectId=${pid}\\&floor=3'
+
+HEALTH REPORT (crashes, stale heartbeats, recommendations):
+  curl -s '${dashboardUrl}/api/agents/health?projectId=${pid}'
+
+CHECK BOARD (task counts by status):
+  curl -s '${dashboardUrl}/api/agent-actions?action=board-summary\\&projectId=${pid}'
+
+LIST TASKS BY STATUS (TODO, IN_PROGRESS, DONE, REVIEW, etc.):
+  curl -s '${dashboardUrl}/api/agent-actions?action=list-tasks\\&projectId=${pid}\\&status=IN_PROGRESS'
+
+GET TASK DETAILS + COMMENTS (full history for one task):
+  curl -s '${dashboardUrl}/api/agent-actions?action=get-task\\&projectId=${pid}\\&taskId=TASK_ID'
+
+LIST EVENTS (errors/warnings — filter by level and agent):
+  curl -s '${dashboardUrl}/api/agent-actions?action=list-events\\&projectId=${pid}\\&level=error,warn\\&limit=30'
+
+CAPTURE AGENT OUTPUT (live tmux output — see what agent is doing):
+  curl -s '${dashboardUrl}/api/agent-actions?action=capture-output\\&projectId=${pid}\\&agentId=AGENT_ID\\&lines=30'
 
 READ MISSION:
-  curl -s ${dashboardUrl}/api/agent-actions?action=read-mission\\&projectId=${pid}
+  curl -s '${dashboardUrl}/api/agent-actions?action=read-mission\\&projectId=${pid}'
 
-LIST PENDING TASKS:
-  curl -s ${dashboardUrl}/api/agent-actions?action=list-tasks\\&projectId=${pid}\\&status=TODO
+LIST CONVERSATIONS (inter-agent messages):
+  curl -s '${dashboardUrl}/api/agent-actions?action=list-conversations\\&projectId=${pid}'
 
-MOVE TASK STATUS (use DONE, IN_PROGRESS, TODO):
-  curl -s -X POST ${dashboardUrl}/api/agent-actions -H 'Content-Type: application/json' -d '{\\\"action\\\":\\\"move-task\\\",\\\"projectId\\\":\\\"${pid}\\\",\\\"taskId\\\":\\\"TASK_ID\\\",\\\"status\\\":\\\"DONE\\\"}'
+READ MESSAGES (for a specific agent or conversation):
+  curl -s '${dashboardUrl}/api/agent-actions?action=list-messages\\&projectId=${pid}\\&agentId=AGENT_ID'
+
+=== ACTIONS (write) ===
+
+MOVE TASK STATUS (DONE, IN_PROGRESS, TODO, REVIEW, etc.):
+  curl -s -X POST ${dashboardUrl}/api/agent-actions -H 'Content-Type: application/json' -d '{\\\"action\\\":\\\"move-task\\\",\\\"projectId\\\":\\\"${pid}\\\",\\\"taskId\\\":\\\"TASK_ID\\\",\\\"status\\\":\\\"DONE\\\",\\\"agentId\\\":\\\"${variant}\\\"}'
+
+CREATE TASK:
+  curl -s -X POST ${dashboardUrl}/api/agent-actions -H 'Content-Type: application/json' -d '{\\\"action\\\":\\\"create-task\\\",\\\"projectId\\\":\\\"${pid}\\\",\\\"title\\\":\\\"TITLE\\\",\\\"status\\\":\\\"TODO\\\",\\\"priority\\\":\\\"P1\\\",\\\"agentId\\\":\\\"${variant}\\\"}'
+
+COMMENT ON TASK:
+  curl -s -X POST ${dashboardUrl}/api/agent-actions -H 'Content-Type: application/json' -d '{\\\"action\\\":\\\"comment-task\\\",\\\"projectId\\\":\\\"${pid}\\\",\\\"taskId\\\":\\\"TASK_ID\\\",\\\"agentId\\\":\\\"${variant}\\\",\\\"content\\\":\\\"COMMENT\\\"}'
 
 SEND MESSAGE TO AGENT:
   curl -s -X POST ${dashboardUrl}/api/agent-actions -H 'Content-Type: application/json' -d '{\\\"action\\\":\\\"send-message\\\",\\\"projectId\\\":\\\"${pid}\\\",\\\"fromAgent\\\":\\\"${variant}\\\",\\\"toAgent\\\":\\\"AGENT_ID\\\",\\\"content\\\":\\\"MESSAGE\\\"}'
+
+BROADCAST MESSAGE (to all agents):
+  curl -s -X POST ${dashboardUrl}/api/agent-actions -H 'Content-Type: application/json' -d '{\\\"action\\\":\\\"send-message\\\",\\\"projectId\\\":\\\"${pid}\\\",\\\"fromAgent\\\":\\\"${variant}\\\",\\\"content\\\":\\\"MESSAGE\\\"}'
 
 LIST TMUX SESSIONS:
   curl -s '${dashboardUrl}/api/tmux?action=list'
@@ -354,8 +448,11 @@ KILL AGENT TMUX SESSION:
 SPAWN AGENTS (replace ROLE and TASK fields):
   curl -s -X POST ${dashboardUrl}/api/agents/launch -H 'Content-Type: application/json' -d '{\\\"projectId\\\":\\\"${pid}\\\",\\\"agents\\\":[\\\"ROLE\\\"],\\\"task\\\":{\\\"id\\\":\\\"TASK_ID\\\",\\\"title\\\":\\\"TASK_TITLE\\\"}}'
 
-SPAWN ALL IDLE AGENTS AT ONCE:
-  curl -s -X POST ${dashboardUrl}/api/agents/launch -H 'Content-Type: application/json' -d '{\\\"projectId\\\":\\\"${pid}\\\",\\\"agents\\\":[\\\"coder\\\",\\\"coder-2\\\",\\\"reviewer\\\",\\\"tester\\\",\\\"architect\\\",\\\"security-auditor\\\",\\\"devops\\\"]}'
+SPAWN ALL DEV FLOOR AGENTS:
+  curl -s -X POST ${dashboardUrl}/api/agents/launch -H 'Content-Type: application/json' -d '{\\\"projectId\\\":\\\"${pid}\\\",\\\"agents\\\":[\\\"architect\\\",\\\"frontend\\\",\\\"backend-1\\\",\\\"backend-2\\\",\\\"tester-1\\\",\\\"tester-2\\\",\\\"rataa-frontend\\\",\\\"rataa-backend\\\"]}'
+
+SPAWN ALL RESEARCH AGENTS:
+  curl -s -X POST ${dashboardUrl}/api/agents/launch -H 'Content-Type: application/json' -d '{\\\"projectId\\\":\\\"${pid}\\\",\\\"agents\\\":[\\\"rataa-research\\\",\\\"researcher-1\\\",\\\"researcher-2\\\",\\\"researcher-3\\\",\\\"researcher-4\\\"]}'
 
 COMMIT AND PUSH:
   curl -s -X POST ${dashboardUrl}/api/git -H 'Content-Type: application/json' -d '{\\\"projectId\\\":\\\"${pid}\\\",\\\"action\\\":\\\"commit-and-push\\\",\\\"message\\\":\\\"YOUR_MESSAGE\\\"}'`;
@@ -372,23 +469,33 @@ GIT STATUS:
   curl -s '${dashboardUrl}/api/git?projectId=${pid}'`;
 
   const opsActions = `== MANDATORY ACTIONS EVERY CYCLE ==
-1. Check agents. For EVERY offline/completed agent, IMMEDIATELY spawn them with a pending task. Do not skip this.
-2. Kill tmux sessions for completed agents to save compute (check tmux list, kill idle ones).
-3. Check board. Move any tasks with verified acceptance criteria to DONE.
-4. If agents are working, send them encouraging messages with specific task guidance.
-5. NEVER end a cycle without spawning all available agents on pending tasks.
-6. At 100% completion: commit and push, print summary.
-7. You work WITH Rataa-2 (Quality). You handle spawning and killing. Rataa-2 handles quality and mission alignment.`;
+1. RUN full-status FIRST to see all 3 floors at once — agents, tasks, who's working on what.
+2. RUN health report to check for crashes, stale heartbeats, and stuck agents.
+3. For EVERY crashed/offline/completed agent, IMMEDIATELY respawn them with a pending task.
+4. If any agent stuck in initializing >5 min, capture-output to see what happened, then kill and respawn.
+5. Kill tmux sessions for completed agents (check tmux list).
+6. Check floor-status for each floor (1, 2, 3) to find gaps in coverage.
+7. Use capture-output on working agents to verify they are making progress (not looping or stuck).
+8. If agents need guidance, send-message to them with specific task instructions.
+9. Check list-events for errors/warnings — surface issues to Rataa-2.
+10. NEVER end a cycle without all agents busy. Spawn idle agents on pending tasks.
+11. At 100% completion: commit and push, print summary.
+12. You work WITH Rataa-2 (Quality). You handle spawning, killing, failure recovery. Rataa-2 handles quality.`;
 
   const qualityActions = `== MANDATORY ACTIONS EVERY CYCLE ==
-1. Read mission. COMPARE mission goal vs current board progress — identify gaps.
-2. Check board for tasks that are DONE but not properly validated. Review their quality.
-3. If work does not align with mission deliverables, create new tasks or send messages to agents with corrections.
-4. Review analytics — check agent performance, identify bottlenecks or idle agents. Send findings to Rataa-1 via message.
-5. Generate standup report periodically to track progress.
-6. Verify code quality by reading key files agents have modified. Send review feedback as messages.
-7. At 100% completion: generate final standup, review all deliverables against mission, report gaps.
-8. You work WITH Rataa-1 (Ops). You handle quality and mission. Rataa-1 handles spawning and killing.`;
+1. RUN full-status FIRST to see all 3 floors — agents, tasks, progress across Research/Dev/Ops.
+2. RUN health report to find crashes and failures. Message Rataa-1 with specific respawn instructions.
+3. Check floor-status for each floor (1, 2, 3) individually. Identify which floors are underperforming.
+4. Read mission. COMPARE mission deliverables vs board progress — flag gaps to agents via messages.
+5. Use get-task for each IN_PROGRESS task to read comments/history — verify agents are making real progress.
+6. Use capture-output on key agents to verify work quality (are they writing good code or just looping?).
+7. Check list-events for errors/warnings — diagnose root causes and message affected agents.
+8. Review list-conversations to monitor inter-agent coordination — flag miscommunication.
+9. For DONE tasks: use get-task to verify acceptance criteria were met. Use submit-review to approve or reject.
+10. Create new tasks if mission deliverables have gaps. Set priority and assign to appropriate floor agents.
+11. Generate standup report periodically to track progress.
+12. At 100%: generate final standup, review all deliverables, report gaps.
+13. You work WITH Rataa-1 (Ops). You handle quality, mission alignment, and communication monitoring.`;
 
   const roleDesc = isQuality
     ? `You are Rataa-2 (Quality Supervisor) for ${pname}. Your job is mission alignment, quality review, analytics monitoring, and ensuring deliverables match the mission. You DO NOT spawn or kill agents — that is Rataa-1's job. You COMPARE mission vs work done, review code quality, and send feedback to agents and Rataa-1.`
@@ -453,7 +560,7 @@ with open(reg_path, 'w') as f: json.dump(reg, f, indent=2)
     --system-prompt "$SYSTEM_PROMPT" \\
     --allowedTools "Read,Bash,Grep,Glob" \\
     -p "${executionPrompt}" \\
-    --max-turns 30 || true
+    --max-budget-usd 5 || true
 
   echo "Cycle complete. Next cycle in 60 seconds..."
   sleep 60
@@ -491,6 +598,11 @@ function registerLaunchedAgent(projectId: string, role: string, coordinationPath
     progress: 0,
     estimated_cost: 0,
     created_at: now,
+    launch_mode: 'tmux',
+    sdk_session_id: null,
+    hook_enabled: 0,
+    worktree_path: null,
+    worktree_branch: null,
   });
 
   // 3. Update coordination registry.json so file-watcher picks it up
@@ -636,7 +748,8 @@ export async function POST(req: NextRequest) {
     } catch {
       return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
     }
-    const { projectId, agents: agentRoles, launchAll, task: taskParam } = body;
+    const { projectId, launchAll, task: taskParam, launchMode: launchModeParam, useWorktree: useWorktreeParam } = body;
+    let agentRoles = body.agents;
 
     if (!projectId) {
       return NextResponse.json({ error: 'projectId required' }, { status: 400 });
@@ -676,53 +789,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ generated });
     }
 
-    // Option 1: Launch all agents via launch-agents.sh
+    // Option 1: Launch all agents — convert to individual agent loop
+    // (Previously used a monolithic bash script which timed out at 30s)
     if (launchAll) {
-      const launchScript = path.join(scriptsDir, 'launch-agents.sh');
-      if (!fs.existsSync(launchScript)) {
-        // Auto-generate launch-agents.sh from selected roles or all known scripts
-        const roles = Array.isArray(agentRoles) ? agentRoles as string[] : [];
-        if (roles.length === 0) {
-          return NextResponse.json({ error: 'No agents specified and launch-agents.sh not found' }, { status: 400 });
-        }
-        // Generate individual scripts and a launch-all wrapper
-        const scriptLines = ['#!/usr/bin/env bash', `# Auto-generated launch script for ${project.name}`, 'set -euo pipefail', 'cd "$(dirname "$0")/.."', ''];
-        for (const role of roles) {
-          const sanitizedRole = sanitizeName(role);
-          if (!sanitizedRole) continue;
-          generateRunnerScript(project.path, sanitizedRole, project.name, projectId as string);
-          const sessionName = `${prefix}-${sanitizedRole}`;
-          scriptLines.push(`echo "Launching ${sanitizedRole}..."`);
-          scriptLines.push(`tmux new-session -d -s ${sessionName} -c "$(pwd)" "bash scripts/run-${sanitizedRole}.sh 2>&1 | tee /tmp/${sessionName}.log; echo '${sanitizedRole.toUpperCase()} DONE'; sleep 999999"`);
-          scriptLines.push('');
-        }
-        scriptLines.push('echo "All agents launched."');
-        if (!fs.existsSync(scriptsDir)) fs.mkdirSync(scriptsDir, { recursive: true });
-        fs.writeFileSync(launchScript, scriptLines.join('\n'), { mode: 0o755 });
+      const roles = Array.isArray(agentRoles) ? agentRoles as string[] : [];
+      if (roles.length === 0) {
+        return NextResponse.json({ error: 'No agents specified' }, { status: 400 });
       }
-      // Validate script path is within the project directory
-      const resolvedScript = path.resolve(launchScript);
-      const resolvedProject = path.resolve(project.path);
-      if (!resolvedScript.startsWith(resolvedProject + path.sep)) {
-        return NextResponse.json({ error: 'Script path outside project directory' }, { status: 400 });
-      }
-      try {
-        execFileSync('bash', [resolvedScript], {
-          cwd: project.path,
-          encoding: 'utf-8',
-          timeout: 30000,
-          env: { ...process.env, CLAUDECODE: undefined },
-        });
-        return NextResponse.json({
-          launched: true,
-          message: 'All agents launched via launch-agents.sh',
-        });
-      } catch (err) {
-        return NextResponse.json({
-          launched: false,
-          error: err instanceof Error ? err.message : 'Launch failed',
-        }, { status: 500 });
-      }
+      // Fall through to individual agent loop below
+      agentRoles = roles;
     }
 
     // Option 2: Launch individual agents
@@ -768,9 +843,62 @@ export async function POST(req: NextRequest) {
             });
           } catch { /* session may already be gone */ }
         } else {
+          launchingLock.delete(sessionName);
           results.push({ role: sanitizedRole, status: 'already_running', session: sessionName });
           continue;
         }
+      }
+
+      // SDK launch mode — use programmatic spawning instead of tmux
+      if (launchModeParam === 'sdk') {
+        try {
+          const { launchAgentWithSDK } = await import('@/lib/sdk/agent-launcher');
+
+          // Optionally create worktree
+          let worktreePath: string | undefined;
+          let worktreeBranch: string | undefined;
+          if (useWorktreeParam) {
+            try {
+              const { createWorktree } = await import('@/lib/sdk/worktree-manager');
+              const wt = createWorktree(project.path, sanitizedRole);
+              worktreePath = wt.worktreePath;
+              worktreeBranch = wt.branch;
+            } catch (wtErr) {
+              // Non-fatal — launch without worktree
+              console.error('Worktree creation failed:', wtErr);
+            }
+          }
+
+          const systemPrompt = generateMissionAwarePrompt(
+            project.path, project.name, sanitizedRole, projectId as string
+          );
+          const taskInfo = taskParam as { id: string; title: string } | undefined;
+          const prompt = taskInfo?.id
+            ? `Work on task ${taskInfo.id}: ${taskInfo.title}. Read .claude/coordination/TASKS.md for details.`
+            : `You are the ${sanitizedRole} agent. Read .claude/coordination/TASKS.md and begin working on your assigned tasks.`;
+
+          const result = await launchAgentWithSDK({
+            projectId: projectId as string,
+            role: sanitizedRole,
+            systemPrompt,
+            prompt,
+            cwd: project.path,
+            coordinationPath: project.coordinationPath,
+            worktreePath,
+            worktreeBranch,
+          });
+
+          results.push({ role: sanitizedRole, status: 'launched', session: result.sessionId });
+        } catch (sdkErr) {
+          results.push({
+            role: sanitizedRole,
+            status: 'error',
+            error: sdkErr instanceof Error ? sdkErr.message : 'SDK launch failed',
+          });
+        } finally {
+          launchingLock.delete(sessionName);
+        }
+        continue;
       }
 
       // Use task-specific relay script or standard run script
@@ -812,16 +940,29 @@ export async function POST(req: NextRequest) {
       }
 
       try {
+        // Optionally create worktree for tmux agents too
+        let tmuxCwd = project.path;
+        if (useWorktreeParam) {
+          try {
+            const { createWorktree } = await import('@/lib/sdk/worktree-manager');
+            const wt = createWorktree(project.path, sanitizedRole);
+            tmuxCwd = wt.worktreePath;
+            // Store worktree info — registerLaunchedAgent will be called below
+          } catch (wtErr) {
+            console.error('Worktree creation failed for tmux agent:', wtErr);
+          }
+        }
+
         const shellCmd = `bash scripts/${scriptFile} 2>&1 | tee /tmp/${sessionName}.log; echo '${sanitizedRole.toUpperCase()} DONE'; sleep 999999`;
         execFileSync('tmux', [
           'new-session', '-d',
           '-s', sessionName,
-          '-c', project.path,
+          '-c', tmuxCwd,
           shellCmd,
         ], {
           encoding: 'utf-8',
           timeout: 10000,
-          env: { ...process.env, CLAUDECODE: undefined },
+          env: getSpawnEnv(),
         });
         // Register agent immediately in DB + coordination files
         registerLaunchedAgent(projectId as string, sanitizedRole, project.coordinationPath);
@@ -925,7 +1066,7 @@ export async function launchAgentWithTask(
       ], {
         encoding: 'utf-8',
         timeout: 10000,
-        env: { ...process.env, CLAUDECODE: undefined },
+        env: getSpawnEnv(),
       });
 
       // Register agent in DB

@@ -45,6 +45,8 @@ const EVENT_TYPE_MAP: Record<string, SSEEventType> = {
   'office.research_complete': 'office:research',
   'office.communication': 'office:communication',
   'office.memory_updated': 'office:memory',
+  // Hooks
+  'hook.received': 'agent:update',
 };
 
 class SSEEmitter {

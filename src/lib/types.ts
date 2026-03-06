@@ -1,11 +1,16 @@
 // Core domain types for the Multi-Agent Dashboard
 
-export type AgentRole = 'architect' | 'coder' | 'coder-2' | 'reviewer' | 'tester' | 'security-auditor' | 'devops' | 'coordinator' | 'supervisor' | 'supervisor-2'
-  | 'rataa-research' | 'rataa-frontend' | 'rataa-backend' | 'rataa-ops'
-  | 'frontend' | 'backend-1' | 'backend-2' | 'tester-1' | 'tester-2'
-  | 'researcher-1' | 'researcher-2' | 'researcher-3' | 'researcher-4';
+export type AgentRole =
+  // Floor 1 — Research
+  | 'rataa-research' | 'researcher-1' | 'researcher-2' | 'researcher-3' | 'researcher-4'
+  // Floor 2 — Development
+  | 'rataa-frontend' | 'rataa-backend' | 'architect' | 'frontend' | 'backend-1' | 'backend-2' | 'tester-1' | 'tester-2'
+  // Floor 3 — Ops
+  | 'rataa-ops' | 'supervisor' | 'supervisor-2';
 
 export type AgentStatus = 'initializing' | 'planning' | 'working' | 'blocked' | 'reviewing' | 'completed' | 'idle' | 'offline';
+
+export type LaunchMode = 'tmux' | 'sdk';
 
 export type TaskStatus = 'BACKLOG' | 'TODO' | 'ASSIGNED' | 'IN_PROGRESS' | 'REVIEW' | 'QUALITY_REVIEW' | 'TESTING' | 'FAILED' | 'TESTED' | 'DONE';
 
@@ -59,6 +64,11 @@ export interface AgentSnapshot {
   progress?: number;
   estimatedCost?: number;
   createdAt: string;
+  launchMode?: LaunchMode;
+  sdkSessionId?: string;
+  hookEnabled?: boolean;
+  worktreePath?: string;
+  worktreeBranch?: string;
 }
 
 export interface DashboardEvent {

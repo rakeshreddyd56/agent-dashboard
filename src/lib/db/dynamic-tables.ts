@@ -33,7 +33,12 @@ export function createProjectTables(projectId: string): void {
       locked_files TEXT NOT NULL DEFAULT '[]',
       progress INTEGER,
       estimated_cost REAL,
-      created_at TEXT NOT NULL
+      created_at TEXT NOT NULL,
+      launch_mode TEXT DEFAULT 'tmux',
+      sdk_session_id TEXT,
+      hook_enabled INTEGER DEFAULT 0,
+      worktree_path TEXT,
+      worktree_branch TEXT
     );
     CREATE INDEX IF NOT EXISTS "idx_${p}_agents_status" ON "${p}_agents"(status);
 
@@ -96,6 +101,35 @@ export function createProjectTables(projectId: string): void {
     );
     CREATE INDEX IF NOT EXISTS "idx_${p}_analytics_ts" ON "${p}_analytics"(timestamp);
   `);
+
+  // Migrate existing tables to add new columns (idempotent)
+  migrateProjectAgentColumns(projectId);
+}
+
+/**
+ * Migrate existing project agent tables to add new columns (idempotent).
+ * Called from createProjectTables — safe to run multiple times.
+ */
+export function migrateProjectAgentColumns(projectId: string): void {
+  const p = sanitizePrefix(projectId);
+  const db = rawDb;
+
+  const cols = db.pragma(`table_info("${p}_agents")`) as { name: string }[];
+  const colNames = new Set(cols.map((c) => c.name));
+
+  const migrations: [string, string][] = [
+    ['launch_mode', `ALTER TABLE "${p}_agents" ADD COLUMN launch_mode TEXT DEFAULT 'tmux'`],
+    ['sdk_session_id', `ALTER TABLE "${p}_agents" ADD COLUMN sdk_session_id TEXT`],
+    ['hook_enabled', `ALTER TABLE "${p}_agents" ADD COLUMN hook_enabled INTEGER DEFAULT 0`],
+    ['worktree_path', `ALTER TABLE "${p}_agents" ADD COLUMN worktree_path TEXT`],
+    ['worktree_branch', `ALTER TABLE "${p}_agents" ADD COLUMN worktree_branch TEXT`],
+  ];
+
+  for (const [col, sql] of migrations) {
+    if (!colNames.has(col)) {
+      db.exec(sql);
+    }
+  }
 }
 
 /**

@@ -54,7 +54,9 @@ export type EventType =
   | 'office.state_changed'
   | 'office.research_complete'
   | 'office.communication'
-  | 'office.memory_updated';
+  | 'office.memory_updated'
+  // Hooks (Phase 7)
+  | 'hook.received';
 
 export interface ServerEvent {
   type: EventType;

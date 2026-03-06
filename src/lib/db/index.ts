@@ -365,6 +365,46 @@ function createDb() {
     sqlite.exec('ALTER TABLE projects ADD COLUMN git_url TEXT');
   }
 
+  // Add SDK/hook columns to shared agent_snapshots table (migration for existing DBs)
+  const agentCols = sqlite.pragma('table_info(agent_snapshots)') as { name: string }[];
+  const agentColNames = new Set(agentCols.map((c) => c.name));
+  const agentMigrations: [string, string][] = [
+    ['launch_mode', "ALTER TABLE agent_snapshots ADD COLUMN launch_mode TEXT DEFAULT 'tmux'"],
+    ['sdk_session_id', 'ALTER TABLE agent_snapshots ADD COLUMN sdk_session_id TEXT'],
+    ['hook_enabled', 'ALTER TABLE agent_snapshots ADD COLUMN hook_enabled INTEGER DEFAULT 0'],
+    ['worktree_path', 'ALTER TABLE agent_snapshots ADD COLUMN worktree_path TEXT'],
+    ['worktree_branch', 'ALTER TABLE agent_snapshots ADD COLUMN worktree_branch TEXT'],
+  ];
+  for (const [col, sql] of agentMigrations) {
+    if (!agentColNames.has(col)) {
+      sqlite.exec(sql);
+    }
+  }
+
+  // Migrate ALL existing per-project agent tables to add new columns
+  try {
+    const projectRows = sqlite.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%_agents'"
+    ).all() as { name: string }[];
+    for (const row of projectRows) {
+      const tableName = row.name;
+      const tCols = sqlite.pragma(`table_info("${tableName}")`) as { name: string }[];
+      const tColNames = new Set(tCols.map((c) => c.name));
+      const perTableMigrations: [string, string][] = [
+        ['launch_mode', `ALTER TABLE "${tableName}" ADD COLUMN launch_mode TEXT DEFAULT 'tmux'`],
+        ['sdk_session_id', `ALTER TABLE "${tableName}" ADD COLUMN sdk_session_id TEXT`],
+        ['hook_enabled', `ALTER TABLE "${tableName}" ADD COLUMN hook_enabled INTEGER DEFAULT 0`],
+        ['worktree_path', `ALTER TABLE "${tableName}" ADD COLUMN worktree_path TEXT`],
+        ['worktree_branch', `ALTER TABLE "${tableName}" ADD COLUMN worktree_branch TEXT`],
+      ];
+      for (const [col, sql] of perTableMigrations) {
+        if (!tColNames.has(col)) {
+          sqlite.exec(sql);
+        }
+      }
+    }
+  } catch { /* non-fatal — tables will be migrated on next createProjectTables call */ }
+
   const drizzleDb = drizzle(sqlite, { schema });
 
   // Initialize background services (lazy to avoid circular deps during build)

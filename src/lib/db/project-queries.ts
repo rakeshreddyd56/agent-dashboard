@@ -12,13 +12,15 @@ export function upsertProjectAgent(projectId: string, agent: AgentRow) {
   const p = sanitizePrefix(projectId);
   rawDb.prepare(`
     INSERT OR REPLACE INTO "${p}_agents"
-    (id, agent_id, role, status, current_task, model, session_start, last_heartbeat, locked_files, progress, estimated_cost, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    (id, agent_id, role, status, current_task, model, session_start, last_heartbeat, locked_files, progress, estimated_cost, created_at, launch_mode, sdk_session_id, hook_enabled, worktree_path, worktree_branch)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     agent.id, agent.agent_id, agent.role, agent.status,
     agent.current_task, agent.model, agent.session_start,
     agent.last_heartbeat, agent.locked_files,
-    agent.progress, agent.estimated_cost, agent.created_at
+    agent.progress, agent.estimated_cost, agent.created_at,
+    agent.launch_mode ?? 'tmux', agent.sdk_session_id ?? null,
+    agent.hook_enabled ?? 0, agent.worktree_path ?? null, agent.worktree_branch ?? null
   );
 }
 
@@ -26,8 +28,8 @@ export function bulkUpsertProjectAgents(projectId: string, agents: AgentRow[]) {
   const p = sanitizePrefix(projectId);
   const stmt = rawDb.prepare(`
     INSERT OR REPLACE INTO "${p}_agents"
-    (id, agent_id, role, status, current_task, model, session_start, last_heartbeat, locked_files, progress, estimated_cost, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    (id, agent_id, role, status, current_task, model, session_start, last_heartbeat, locked_files, progress, estimated_cost, created_at, launch_mode, sdk_session_id, hook_enabled, worktree_path, worktree_branch)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const tx = rawDb.transaction((list: AgentRow[]) => {
     for (const a of list) {
@@ -35,7 +37,9 @@ export function bulkUpsertProjectAgents(projectId: string, agents: AgentRow[]) {
         a.id, a.agent_id, a.role, a.status,
         a.current_task, a.model, a.session_start,
         a.last_heartbeat, a.locked_files,
-        a.progress, a.estimated_cost, a.created_at
+        a.progress, a.estimated_cost, a.created_at,
+        a.launch_mode ?? 'tmux', a.sdk_session_id ?? null,
+        a.hook_enabled ?? 0, a.worktree_path ?? null, a.worktree_branch ?? null
       );
     }
   });
@@ -285,6 +289,11 @@ export interface AgentRow {
   progress: number | null;
   estimated_cost: number | null;
   created_at: string;
+  launch_mode: string | null;
+  sdk_session_id: string | null;
+  hook_enabled: number | null;
+  worktree_path: string | null;
+  worktree_branch: string | null;
 }
 
 export interface TaskRow {

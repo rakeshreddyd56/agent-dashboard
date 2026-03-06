@@ -9,6 +9,7 @@ import { BurndownChart } from '@/components/analytics/burndown-chart';
 import { ActivityHeatmap } from '@/components/analytics/activity-heatmap';
 import { PipelineStatusPanel } from '@/components/analytics/pipeline-status-panel';
 import { QualityGateStats } from '@/components/analytics/quality-gate-stats';
+import { FloorMetrics } from '@/components/analytics/floor-metrics';
 import { useEventStore } from '@/lib/store/event-store';
 import { useTaskStore } from '@/lib/store/task-store';
 import { useAgentStore } from '@/lib/store/agent-store';
@@ -36,6 +37,7 @@ interface TmuxSession {
 interface AnalyticsResponse {
   snapshots: AnalyticsSnapshot[];
   tasksByStatus: Record<string, number>;
+  tasksByAgent: Record<string, { total: number; done: number; inProgress: number }>;
   agentsByStatus: Record<string, number>;
   totalTasks: number;
   totalAgents: number;
@@ -221,6 +223,7 @@ export default function AnalyticsPage() {
       ) : (
         <ErrorBoundary>
           <div className="grid gap-6 lg:grid-cols-2">
+            <FloorMetrics agents={agents} tasksByAgent={data?.tasksByAgent || {}} loading={loading} />
             <VelocityChart data={velocityData} loading={loading} />
             <BurndownChart snapshots={data?.snapshots || []} totalTasks={tasks.filter((t) => t.projectId === activeProjectId).length} loading={loading} />
             <UtilizationChart agents={agents} tmuxSessions={tmuxSessions} loading={loading} />

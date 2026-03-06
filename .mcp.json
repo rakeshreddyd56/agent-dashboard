@@ -1,0 +1,23 @@
+{
+  "mcpServers": {
+    "memory": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-memory"],
+      "env": {
+        "MEMORY_FILE": ".claude/memory/knowledge-graph.json"
+      }
+    },
+    "playwright": {
+      "command": "npx",
+      "args": ["-y", "@playwright/mcp@latest"]
+    },
+    "github": {
+      "type": "url",
+      "url": "https://api.githubcopilot.com/mcp/"
+    },
+    "notion": {
+      "type": "url",
+      "url": "https://mcp.notion.com/mcp"
+    }
+  }
+}

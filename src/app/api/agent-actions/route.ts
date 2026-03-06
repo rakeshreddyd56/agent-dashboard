@@ -3,6 +3,7 @@ import { db, schema } from '@/lib/db';
 import { eq, and, desc, or, isNull } from 'drizzle-orm';
 import { eventBus } from '@/lib/events/event-bus';
 import { projectTablesExist, createProjectTables } from '@/lib/db/dynamic-tables';
+import { OFFICE_CONFIG } from '@/lib/constants';
 import {
   getProjectAgents,
   upsertProjectAgent,
@@ -35,6 +36,8 @@ import type { AgentRow, TaskRow, EventRow, CommentRow } from '@/lib/db/project-q
 const AGENT_READ_ACTIONS = new Set([
   'list-tasks', 'list-agents', 'board-summary', 'read-mission', 'get-task', 'get-comments',
   'list-messages', 'list-conversations', 'get-notifications', 'get-reviews',
+  // Supervisor visibility actions
+  'floor-status', 'full-status', 'list-events', 'capture-output',
 ]);
 
 const AGENT_WRITE_ACTIONS = new Set([
@@ -246,6 +249,180 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ reviews });
     }
 
+    case 'floor-status': {
+      const floor = parseInt(searchParams.get('floor') || '0');
+      const floorAgentRoles = floor > 0
+        ? (OFFICE_CONFIG.floorAgents as Record<number, string[]>)[floor] || []
+        : Object.values(OFFICE_CONFIG.floorAgents as Record<number, string[]>).flat();
+
+      const agents = getProjectAgents(projectId);
+      const tasks = getProjectTasks(projectId);
+
+      // Filter agents by floor
+      const floorAgents = agents.filter((a) => floorAgentRoles.includes(a.agent_id) || floorAgentRoles.includes(a.role));
+
+      // Build per-agent detail with their tasks
+      const agentDetails = floorAgents.map((a) => {
+        const agentTasks = tasks.filter((t) => t.assigned_agent === a.agent_id);
+        return {
+          agentId: a.agent_id,
+          role: a.role,
+          status: a.status,
+          currentTask: a.current_task,
+          lastHeartbeat: a.last_heartbeat,
+          progress: a.progress,
+          tasks: agentTasks.map((t) => ({
+            id: t.id,
+            externalId: t.external_id,
+            title: t.title,
+            status: t.status,
+            priority: t.priority,
+            updatedAt: t.updated_at,
+          })),
+        };
+      });
+
+      // Floor-level task stats
+      const floorTaskIds = new Set(floorAgents.map((a) => a.current_task).filter(Boolean));
+      const floorTasks = tasks.filter((t) => floorTaskIds.has(t.id) || floorTaskIds.has(t.external_id) || floorAgents.some((a) => t.assigned_agent === a.agent_id));
+      const tasksByStatus: Record<string, number> = {};
+      for (const t of floorTasks) tasksByStatus[t.status] = (tasksByStatus[t.status] || 0) + 1;
+
+      const floorNames: Record<number, string> = { 1: 'Research Lab', 2: 'Dev Floor', 3: 'Ops Center' };
+
+      return NextResponse.json({
+        floor: floor || 'all',
+        floorName: floor > 0 ? floorNames[floor] || `Floor ${floor}` : 'All Floors',
+        agents: agentDetails,
+        agentCount: agentDetails.length,
+        activeCount: agentDetails.filter((a) => a.status === 'working' || a.status === 'planning' || a.status === 'reviewing').length,
+        tasksByStatus,
+        totalTasks: floorTasks.length,
+      });
+    }
+
+    case 'full-status': {
+      const agents = getProjectAgents(projectId);
+      const tasks = getProjectTasks(projectId);
+
+      // Build comprehensive per-floor breakdown
+      const floors = [1, 2, 3].map((floorNum) => {
+        const floorRoles = (OFFICE_CONFIG.floorAgents as Record<number, string[]>)[floorNum] || [];
+        const fAgents = agents.filter((a) => floorRoles.includes(a.agent_id) || floorRoles.includes(a.role));
+        const fTasks = tasks.filter((t) => fAgents.some((a) => t.assigned_agent === a.agent_id));
+        const floorNames: Record<number, string> = { 1: 'Research Lab', 2: 'Dev Floor', 3: 'Ops Center' };
+
+        return {
+          floor: floorNum,
+          name: floorNames[floorNum],
+          agents: fAgents.map((a) => ({
+            agentId: a.agent_id,
+            role: a.role,
+            status: a.status,
+            currentTask: a.current_task,
+            lastHeartbeat: a.last_heartbeat,
+          })),
+          activeCount: fAgents.filter((a) => ['working', 'planning', 'reviewing'].includes(a.status)).length,
+          totalAgents: fAgents.length,
+          tasks: {
+            total: fTasks.length,
+            inProgress: fTasks.filter((t) => t.status === 'IN_PROGRESS').length,
+            done: fTasks.filter((t) => t.status === 'DONE').length,
+            blocked: fTasks.filter((t) => t.status === 'FAILED').length,
+          },
+        };
+      });
+
+      // Global task stats
+      const tasksByStatus: Record<string, number> = {};
+      for (const t of tasks) tasksByStatus[t.status] = (tasksByStatus[t.status] || 0) + 1;
+
+      // Unassigned tasks
+      const unassigned = tasks.filter((t) => !t.assigned_agent && t.status !== 'DONE' && t.status !== 'BACKLOG');
+
+      return NextResponse.json({
+        floors,
+        global: {
+          totalAgents: agents.length,
+          activeAgents: agents.filter((a) => ['working', 'planning', 'reviewing'].includes(a.status)).length,
+          totalTasks: tasks.length,
+          tasksByStatus,
+          unassignedTasks: unassigned.map((t) => ({ id: t.id, externalId: t.external_id, title: t.title, status: t.status, priority: t.priority })),
+        },
+      });
+    }
+
+    case 'list-events': {
+      const level = searchParams.get('level'); // error, warn, info, success
+      const agentId = searchParams.get('agentId');
+      const limit = Math.min(parseInt(searchParams.get('limit') || '50'), 200);
+
+      const { getProjectEvents } = await import('@/lib/db/project-queries');
+      let events = getProjectEvents(projectId);
+
+      // Filter by level
+      if (level) {
+        const levels = level.split(',');
+        events = events.filter((e) => levels.includes(e.level));
+      }
+
+      // Filter by agent
+      if (agentId) {
+        events = events.filter((e) => e.agent_id === agentId);
+      }
+
+      // Limit and reverse (newest first)
+      events = events.slice(-limit).reverse();
+
+      return NextResponse.json({
+        events: events.map((e) => ({
+          id: e.id,
+          timestamp: e.timestamp,
+          level: e.level,
+          agentId: e.agent_id,
+          agentRole: e.agent_role,
+          message: e.message,
+          details: e.details,
+        })),
+        count: events.length,
+      });
+    }
+
+    case 'capture-output': {
+      const agentId = searchParams.get('agentId');
+      const lines = Math.min(parseInt(searchParams.get('lines') || '20'), 100);
+      if (!agentId) {
+        return NextResponse.json({ error: 'agentId required' }, { status: 400 });
+      }
+
+      const { execFileSync } = await import('child_process');
+
+      // Find tmux session for this agent
+      let sessions: string[] = [];
+      try {
+        const output = execFileSync('tmux', ['ls'], { encoding: 'utf-8', timeout: 3000, stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+        sessions = output ? output.split('\n').map((l) => l.split(':')[0]) : [];
+      } catch { sessions = []; }
+
+      const session = sessions.find((s) => s.includes(agentId));
+      if (!session) {
+        return NextResponse.json({ agentId, session: null, output: null, error: 'No tmux session found' });
+      }
+
+      let paneOutput = '';
+      let paneCommand = '';
+      try {
+        paneOutput = execFileSync('tmux', ['capture-pane', '-t', session, '-p', '-S', `-${lines}`], {
+          encoding: 'utf-8', timeout: 3000, stdio: ['pipe', 'pipe', 'pipe'],
+        }).trim();
+        paneCommand = execFileSync('tmux', ['list-panes', '-t', session, '-F', '#{pane_current_command}'], {
+          encoding: 'utf-8', timeout: 3000, stdio: ['pipe', 'pipe', 'pipe'],
+        }).trim();
+      } catch { /* session might be gone */ }
+
+      return NextResponse.json({ agentId, session, command: paneCommand, output: paneOutput, lines: paneOutput.split('\n').length });
+    }
+
     default:
       return NextResponse.json({
         error: 'Unknown or missing action.',
@@ -262,6 +439,10 @@ export async function GET(req: NextRequest) {
           'list-conversations': 'GET ?action=list-conversations&projectId=X',
           'get-notifications': 'GET ?action=get-notifications&projectId=X&agentId=Y',
           'get-reviews': 'GET ?action=get-reviews&projectId=X&taskId=Y',
+          'floor-status': 'GET ?action=floor-status&projectId=X&floor=1|2|3 (per-floor agents+tasks)',
+          'full-status': 'GET ?action=full-status&projectId=X (all floors, all agents, all tasks)',
+          'list-events': 'GET ?action=list-events&projectId=X[&level=error,warn][&agentId=Y][&limit=50]',
+          'capture-output': 'GET ?action=capture-output&projectId=X&agentId=Y[&lines=20] (tmux output)',
           'move-task': 'POST {action:"move-task", projectId, taskId, status, agentId}',
           'create-task': 'POST {action:"create-task", projectId, title, status, priority, agentId}',
           'create-bug': 'POST {action:"create-bug", projectId, title, description, priority, agentId}',
@@ -576,7 +757,7 @@ export async function POST(req: NextRequest) {
         upsertProjectAgent(projectId, {
           id,
           agent_id: agentId,
-          role: role || 'coder',
+          role: role || 'architect',
           status: status || 'working',
           current_task: currentTask || null,
           model: null,
@@ -586,6 +767,11 @@ export async function POST(req: NextRequest) {
           progress: 0,
           estimated_cost: 0,
           created_at: now,
+          launch_mode: null,
+          sdk_session_id: null,
+          hook_enabled: null,
+          worktree_path: null,
+          worktree_branch: null,
         });
       }
 

@@ -82,37 +82,53 @@ for (let r = 2; r <= 5; r++) {
 const SUPERVISOR_DESK: Vec = { x: 17, y: 10 };
 const SUPERVISOR_2_DESK: Vec = { x: 16, y: 10 };
 
-/** All-floors desk assignment: each agent role → desk index in DESK_TILES */
+/** All-floors desk assignment: each agent role → desk index in DESK_TILES (12 desks). */
 const ALL_FLOORS_DESK_MAP: Record<string, number> = {
-  // Row 1 (y=3): leads + architect
+  // Floor 2 — Dev
   'rataa-frontend': 0, 'rataa-backend': 1, 'architect': 2, 'frontend': 3,
-  // Row 2 (y=7): backend + testers
   'backend-1': 4, 'backend-2': 5, 'tester-1': 6, 'tester-2': 7,
-  // Row 3 (y=11): researchers
+  // Floor 1 — Research
   'rataa-research': 8, 'researcher-1': 9, 'researcher-2': 10, 'researcher-3': 11,
-  // Overflow
-  'researcher-4': 8, 'rataa-ops': 9,
+  'researcher-4': 8,
+  // Floor 3 — Ops
+  'rataa-ops': 9, 'supervisor': 10, 'supervisor-2': 11,
 };
 if (LAYOUT[10]) { LAYOUT[10][16] = 4; LAYOUT[10][17] = 2; LAYOUT[10][18] = 4; }
 if (LAYOUT[11]) LAYOUT[11][17] = 3;
 
 /* ───────── default furniture ───────── */
 const FURNITURE: FurnitureItem[] = [
+  // Desks + chairs
   ...DESK_TILES.map(d => ({ img: '/pixel-agents/furniture/desks/DEFAULT_DESK.png', x: d.x, y: d.y, w: 32, h: 32 })),
-  ...DESK_TILES.slice(0, 8).map(d => ({ img: '/pixel-agents/furniture/electronics/MONITOR_FRONT_ON.png', x: d.x, y: d.y, w: 16, h: 16 })),
-  ...DESK_TILES.slice(8).map(d => ({ img: '/pixel-agents/furniture/electronics/LAPTOP_FRONT_ON.png', x: d.x, y: d.y, w: 16, h: 32 })),
   ...DESK_TILES.map(d => ({ img: '/pixel-agents/furniture/chairs/CHAIR_ROTATING_FRONT.png', x: d.x, y: d.y + 1, w: 16, h: 16 })),
+  // Break room
   { img: '/pixel-agents/furniture/misc/VENDING_MACHINE.png', x: 18, y: 2, w: 32, h: 32 },
   { img: '/pixel-agents/furniture/misc/COFFEE_MACHINE.png', x: 16, y: 2, w: 16, h: 32 },
   { img: '/pixel-agents/furniture/misc/WATER_COOLER.png', x: 16, y: 4, w: 16, h: 32 },
   { img: '/pixel-agents/furniture/desks/COFFEE_TABLE_LG.png', x: 17, y: 4, w: 32, h: 32 },
+  // Server room
   { img: '/pixel-agents/furniture/electronics/SERVER.png', x: 16, y: 8, w: 16, h: 32 },
   { img: '/pixel-agents/furniture/electronics/SERVER.png', x: 17, y: 8, w: 16, h: 32 },
   { img: '/pixel-agents/furniture/electronics/PRINTER_DESKTOP.png', x: 18, y: 8, w: 16, h: 32 },
+  // Supervisor desk
   { img: '/pixel-agents/furniture/desks/DEFAULT_DESK.png', x: 17, y: 10, w: 32, h: 32 },
   { img: '/pixel-agents/furniture/electronics/MONITOR_CRT_ON.png', x: 16, y: 10, w: 16, h: 16 },
   { img: '/pixel-agents/furniture/chairs/CHAIR_ROTATING_FRONT.png', x: 17, y: 11, w: 16, h: 16 },
   { img: '/pixel-agents/furniture/misc/COFFEE_MUG.png', x: 18, y: 10, w: 16, h: 16 },
+  // ── Wall decorations ──
+  { img: '/pixel-agents/furniture/wall/CLOCK_WALL_COLOR.png', x: 14, y: 1, w: 16, h: 16 },
+  { img: '/pixel-agents/furniture/wall/PAINTING_SM.png', x: 2, y: 1, w: 16, h: 16 },
+  { img: '/pixel-agents/furniture/wall/PAINTING_SM_2.png', x: 10, y: 1, w: 16, h: 16 },
+  // ── Plants ──
+  { img: '/pixel-agents/furniture/decor/DEFAULT_PLANT.png', x: 1, y: 2, w: 16, h: 32 },
+  { img: '/pixel-agents/furniture/decor/PLANT_1.png', x: 1, y: 6, w: 16, h: 32 },
+  { img: '/pixel-agents/furniture/decor/PLANT_2.png', x: 1, y: 10, w: 16, h: 32 },
+  { img: '/pixel-agents/furniture/decor/WHITE_PLANT_1.png', x: 18, y: 12, w: 16, h: 32 },
+  // ── Desk accessories ──
+  { img: '/pixel-agents/furniture/decor/DEFAULT_LAMP.png', x: 4, y: 3, w: 16, h: 16 },
+  { img: '/pixel-agents/furniture/misc/COFFEE_MUG.png', x: 10, y: 3, w: 16, h: 16 },
+  { img: '/pixel-agents/furniture/decor/PAPER_FRONT.png', x: 7, y: 7, w: 16, h: 16 },
+  // ── Bins ──
   { img: '/pixel-agents/furniture/misc/BIN.png', x: 15, y: 12, w: 16, h: 16 },
   { img: '/pixel-agents/furniture/misc/BIN.png', x: 1, y: 12, w: 16, h: 16 },
 ];
@@ -127,11 +143,6 @@ const DEFAULT_COLORS = {
 
 /* ───────── character sprite mapping (char_0..char_5) ───────── */
 const CHAR_MAP: Record<string, number> = {
-  // Legacy roles
-  'coder-1': 1, coder: 1, 'coder-2': 2,
-  reviewer: 3, tester: 4, 'security-auditor': 5, security: 5,
-  devops: 0, coordinator: 3, supervisor: 5, 'supervisor-2': 5,
-  'ui-builder': 2, 'ui-polish': 4, 'ui-tester': 1,
   // Floor 1 — Research Lab
   'rataa-research': 3,  // Robin
   'researcher-1': 1,    // Chopper
@@ -149,6 +160,8 @@ const CHAR_MAP: Record<string, number> = {
   'tester-2': 2,        // Tashigi
   // Floor 3 — Ops Center
   'rataa-ops': 1,       // Luffy
+  supervisor: 5,        // Rataa-1
+  'supervisor-2': 3,    // Rataa-2
 };
 
 const STATUS_COLOR: Record<string, string> = {
@@ -333,16 +346,23 @@ export function PixelOffice({ agents, compact, projectName, floorId = 'all' }: P
   const activeConfigRef = useRef(activeConfig);
   activeConfigRef.current = activeConfig;
 
-  // Stabilize: keep last non-empty agents array to prevent glitching during SSE sync gaps
+  // Stabilize: keep last non-empty agents for SSE sync gaps, but reset on floor change
   const lastAgentsRef = useRef<AgentSnapshot[]>(agents);
+  const lastFloorRef = useRef(floorId);
   const visible = useMemo(() => {
+    // If floor changed, accept the new agents (even if empty — that floor may have no agents)
+    if (lastFloorRef.current !== floorId) {
+      lastFloorRef.current = floorId;
+      lastAgentsRef.current = agents;
+      return agents;
+    }
+    // Only guard against brief SSE sync gaps (same floor, transient empty)
     if (agents.length === 0 && lastAgentsRef.current.length > 0) {
-      // Don't wipe sims during brief empty-array gaps from SSE sync
       return lastAgentsRef.current;
     }
     lastAgentsRef.current = agents;
     return agents;
-  }, [agents]);
+  }, [agents, floorId]);
 
   const canvasW = compact ? Math.min(W, 780) : W;
   const canvasH = compact ? Math.min(H, 420) : H;
@@ -413,9 +433,10 @@ export function PixelOffice({ agents, compact, projectName, floorId = 'all' }: P
 
       // Deterministic desk assignment: look up by agentId first, then role, then fallback to index
       let desk: Vec;
-      if (agent.role === 'supervisor') {
+      const isAllFloors = floorIdRef.current === 'all';
+      if (isAllFloors && agent.role === 'supervisor') {
         desk = SUPERVISOR_DESK;
-      } else if (agent.role === 'supervisor-2') {
+      } else if (isAllFloors && agent.role === 'supervisor-2') {
         desk = SUPERVISOR_2_DESK;
       } else {
         const assignedIdx = cfg.deskAssignments[agent.agentId]

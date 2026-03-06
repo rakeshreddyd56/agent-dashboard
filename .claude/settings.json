@@ -1,0 +1,37 @@
+{
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+  },
+  "hooks": {
+    "Stop": [
+      {
+        "type": "command",
+        "command": "curl -s -X POST http://localhost:4000/api/hooks -H 'Content-Type: application/json' -d '{\"type\":\"Stop\",\"session_id\":\"'\"$CLAUDE_SESSION_ID\"'\",\"agent_id\":\"'\"$CLAUDE_AGENT_ID\"'\",\"project_id\":\"'\"$CLAUDE_PROJECT_ID\"'\",\"timestamp\":\"'\"$(date -u +%Y-%m-%dT%H:%M:%S.000Z)\"'\"}' 2>/dev/null || true"
+      }
+    ],
+    "SubagentStop": [
+      {
+        "type": "command",
+        "command": "curl -s -X POST http://localhost:4000/api/hooks -H 'Content-Type: application/json' -d '{\"type\":\"SubagentStop\",\"session_id\":\"'\"$CLAUDE_SESSION_ID\"'\",\"agent_id\":\"'\"$CLAUDE_AGENT_ID\"'\",\"project_id\":\"'\"$CLAUDE_PROJECT_ID\"'\",\"timestamp\":\"'\"$(date -u +%Y-%m-%dT%H:%M:%S.000Z)\"'\"}' 2>/dev/null || true"
+      }
+    ],
+    "PostToolUse": [
+      {
+        "type": "command",
+        "command": "curl -s -X POST http://localhost:4000/api/hooks -H 'Content-Type: application/json' -d '{\"type\":\"PostToolUse\",\"session_id\":\"'\"$CLAUDE_SESSION_ID\"'\",\"agent_id\":\"'\"$CLAUDE_AGENT_ID\"'\",\"project_id\":\"'\"$CLAUDE_PROJECT_ID\"'\",\"tool_name\":\"'\"$CLAUDE_TOOL_NAME\"'\",\"timestamp\":\"'\"$(date -u +%Y-%m-%dT%H:%M:%S.000Z)\"'\"}' 2>/dev/null || true"
+      }
+    ],
+    "TaskCompleted": [
+      {
+        "type": "command",
+        "command": "curl -s -X POST http://localhost:4000/api/hooks -H 'Content-Type: application/json' -d '{\"type\":\"TaskCompleted\",\"session_id\":\"'\"$CLAUDE_SESSION_ID\"'\",\"agent_id\":\"'\"$CLAUDE_AGENT_ID\"'\",\"project_id\":\"'\"$CLAUDE_PROJECT_ID\"'\",\"timestamp\":\"'\"$(date -u +%Y-%m-%dT%H:%M:%S.000Z)\"'\"}' 2>/dev/null || true"
+      }
+    ],
+    "Notification": [
+      {
+        "type": "command",
+        "command": "curl -s -X POST http://localhost:4000/api/hooks -H 'Content-Type: application/json' -d '{\"type\":\"Notification\",\"session_id\":\"'\"$CLAUDE_SESSION_ID\"'\",\"agent_id\":\"'\"$CLAUDE_AGENT_ID\"'\",\"project_id\":\"'\"$CLAUDE_PROJECT_ID\"'\",\"timestamp\":\"'\"$(date -u +%Y-%m-%dT%H:%M:%S.000Z)\"'\"}' 2>/dev/null || true"
+      }
+    ]
+  }
+}

@@ -15,6 +15,7 @@ import {
   Settings,
   Shell,
   Rocket,
+  Building2,
 } from 'lucide-react';
 
 const navItems = [
@@ -25,6 +26,7 @@ const navItems = [
   { href: '/backlog', label: 'Backlog', icon: List },
   { href: '/activity', label: 'Activity', icon: Activity },
   { href: '/analytics', label: 'Analytics', icon: BarChart3 },
+  { href: '/office', label: 'Office', icon: Building2 },
   { href: '/standup', label: 'Standup', icon: FileText },
   { href: '/settings', label: 'Settings', icon: Settings },
 ];

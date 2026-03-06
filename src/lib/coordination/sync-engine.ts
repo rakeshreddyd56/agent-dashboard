@@ -117,6 +117,11 @@ async function _syncProjectInner(project: Project) {
     progress: a.progress ?? null,
     estimated_cost: a.estimatedCost ?? null,
     created_at: a.createdAt,
+    launch_mode: a.launchMode ?? null,
+    sdk_session_id: a.sdkSessionId ?? null,
+    hook_enabled: a.hookEnabled ? 1 : null,
+    worktree_path: a.worktreePath ?? null,
+    worktree_branch: a.worktreeBranch ?? null,
   }));
 
   bulkUpsertProjectAgents(projectId, agentRows);

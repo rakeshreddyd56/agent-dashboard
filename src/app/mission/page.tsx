@@ -19,6 +19,9 @@ import {
   FileText,
   Users,
   RefreshCw,
+  Cpu,
+  GitBranch,
+  Radio,
 } from 'lucide-react';
 import type { Mission } from '@/lib/types';
 
@@ -36,18 +39,51 @@ interface LaunchInfo {
   launchScriptExists: boolean;
 }
 
-const AVAILABLE_ROLES = [
-  { id: 'architect', label: 'Architect', desc: 'System design & planning' },
-  { id: 'coder', label: 'Coder', desc: 'Implementation' },
-  { id: 'coder-1', label: 'Coder-1', desc: 'Backend implementation' },
-  { id: 'coder-2', label: 'Coder-2', desc: 'Frontend implementation' },
-  { id: 'reviewer', label: 'Reviewer', desc: 'Code review & quality' },
-  { id: 'tester', label: 'Tester', desc: 'Testing & validation' },
-  { id: 'security', label: 'Security', desc: 'Security auditing' },
-  { id: 'devops', label: 'DevOps', desc: 'Infrastructure & CI/CD' },
-  { id: 'coordinator', label: 'Coordinator', desc: 'Team orchestration' },
-  { id: 'supervisor', label: 'Rataa-1 (Ops)', desc: 'Agent lifecycle: spawn, monitor, kill' },
-  { id: 'supervisor-2', label: 'Rataa-2 (Quality)', desc: 'Mission alignment & quality review' },
+interface RoleGroup {
+  floor: string;
+  floorNum: number;
+  color: string;
+  roles: { id: string; label: string; desc: string }[];
+}
+
+const ROLE_GROUPS: RoleGroup[] = [
+  {
+    floor: 'Research Lab',
+    floorNum: 1,
+    color: '#c8a87a',
+    roles: [
+      { id: 'rataa-research', label: 'Robin (Lead)', desc: 'Research coordination & synthesis' },
+      { id: 'researcher-1', label: 'Chopper', desc: 'GPT-4o researcher' },
+      { id: 'researcher-2', label: 'Brook', desc: 'Claude researcher' },
+      { id: 'researcher-3', label: 'Jinbe', desc: 'Gemini researcher' },
+      { id: 'researcher-4', label: 'Carrot', desc: 'Llama researcher' },
+    ],
+  },
+  {
+    floor: 'Dev Floor',
+    floorNum: 2,
+    color: '#8ab4f8',
+    roles: [
+      { id: 'rataa-frontend', label: 'Nami (Frontend Lead)', desc: 'Frontend architecture & oversight' },
+      { id: 'rataa-backend', label: 'Franky (Backend Lead)', desc: 'Backend architecture & oversight' },
+      { id: 'architect', label: 'Usopp (Architect)', desc: 'System design & planning' },
+      { id: 'frontend', label: 'Sanji (Frontend)', desc: 'Frontend implementation' },
+      { id: 'backend-1', label: 'Zoro (Backend)', desc: 'Backend implementation' },
+      { id: 'backend-2', label: 'Law (Backend)', desc: 'Backend implementation' },
+      { id: 'tester-1', label: 'Smoker (Tester)', desc: 'Testing & validation' },
+      { id: 'tester-2', label: 'Tashigi (Tester)', desc: 'Testing & validation' },
+    ],
+  },
+  {
+    floor: 'Ops Center',
+    floorNum: 3,
+    color: '#ef4444',
+    roles: [
+      { id: 'rataa-ops', label: 'Luffy (Ops)', desc: 'Deployment & CI/CD' },
+      { id: 'supervisor', label: 'Rataa-1 (Supervisor)', desc: 'Agent lifecycle: spawn, monitor, kill' },
+      { id: 'supervisor-2', label: 'Rataa-2 (Quality)', desc: 'Mission alignment & quality review' },
+    ],
+  },
 ];
 
 const POLL_INTERVAL = 5000;
@@ -69,6 +105,11 @@ export default function MissionPage() {
   const [techStack, setTechStack] = useState('');
   const [deliverables, setDeliverables] = useState('');
   const [selectedRoles, setSelectedRoles] = useState<Set<string>>(new Set());
+
+  // Launch mode + worktree
+  const [launchMode, setLaunchMode] = useState<'tmux' | 'sdk'>('tmux');
+  const [useWorktree, setUseWorktree] = useState(false);
+  const [remoteInfo, setRemoteInfo] = useState<Record<string, string> | null>(null);
 
   // Terminal preview
   const [terminalOutput, setTerminalOutput] = useState<Record<string, string>>({});
@@ -182,7 +223,7 @@ export default function MissionPage() {
       const res = await fetch('/api/agents/launch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId: activeProjectId, launchAll: true, agents: Array.from(selectedRoles) }),
+        body: JSON.stringify({ projectId: activeProjectId, launchAll: true, agents: Array.from(selectedRoles), launchMode, useWorktree }),
       });
       const data = await res.json();
       if (data.launched) {
@@ -207,7 +248,7 @@ export default function MissionPage() {
       const res = await fetch('/api/agents/launch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId: activeProjectId, agents: Array.from(selectedRoles) }),
+        body: JSON.stringify({ projectId: activeProjectId, agents: Array.from(selectedRoles), launchMode, useWorktree }),
       });
       const data = await res.json();
       if (data.results) {
@@ -331,28 +372,70 @@ export default function MissionPage() {
                   <Users className="mr-1 inline h-3 w-3" />
                   Agent Team
                 </label>
-                <div className="flex flex-wrap gap-2">
-                  {AVAILABLE_ROLES.map((role) => {
-                    const isSelected = selectedRoles.has(role.id);
-                    const hasScript = launchInfo?.agentScripts.some((s) => s.role === role.id);
+                <div className="space-y-3">
+                  {ROLE_GROUPS.map((group) => {
+                    const groupRoleIds = group.roles.map((r) => r.id);
+                    const selectedInGroup = groupRoleIds.filter((id) => selectedRoles.has(id)).length;
+                    const allSelected = selectedInGroup === groupRoleIds.length;
+                    const toggleFloor = () => {
+                      setSelectedRoles((prev) => {
+                        const next = new Set(prev);
+                        if (allSelected) {
+                          for (const id of groupRoleIds) next.delete(id);
+                        } else {
+                          for (const id of groupRoleIds) next.add(id);
+                        }
+                        return next;
+                      });
+                    };
                     return (
-                      <button
-                        key={role.id}
-                        onClick={() => toggleRole(role.id)}
-                        className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs transition-colors ${
-                          isSelected
-                            ? 'border-primary bg-primary/10 text-primary'
-                            : 'border-border text-muted-foreground hover:border-primary/50'
-                        }`}
-                      >
-                        {isSelected ? (
-                          <CheckCircle className="h-3 w-3" />
-                        ) : (
-                          <Circle className="h-3 w-3" />
-                        )}
-                        {role.label}
-                        {hasScript && <Badge variant="outline" className="ml-1 px-1 text-[8px]">script</Badge>}
-                      </button>
+                      <div key={group.floor}>
+                        <div className="mb-1.5 flex items-center gap-2">
+                          <button
+                            onClick={toggleFloor}
+                            className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider hover:opacity-80"
+                            style={{ color: group.color }}
+                          >
+                            {allSelected ? (
+                              <CheckCircle className="h-3 w-3" />
+                            ) : selectedInGroup > 0 ? (
+                              <Circle className="h-3 w-3 opacity-60" />
+                            ) : (
+                              <Circle className="h-3 w-3 opacity-30" />
+                            )}
+                            {group.floorNum > 0 ? `Floor ${group.floorNum} — ` : ''}{group.floor}
+                          </button>
+                          <span className="text-[9px] text-muted-foreground">
+                            {selectedInGroup}/{groupRoleIds.length}
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {group.roles.map((role) => {
+                            const isSelected = selectedRoles.has(role.id);
+                            const hasScript = launchInfo?.agentScripts.some((s) => s.role === role.id);
+                            return (
+                              <button
+                                key={role.id}
+                                onClick={() => toggleRole(role.id)}
+                                title={role.desc}
+                                className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs transition-colors ${
+                                  isSelected
+                                    ? 'border-primary bg-primary/10 text-primary'
+                                    : 'border-border text-muted-foreground hover:border-primary/50'
+                                }`}
+                              >
+                                {isSelected ? (
+                                  <CheckCircle className="h-3 w-3" />
+                                ) : (
+                                  <Circle className="h-3 w-3" />
+                                )}
+                                {role.label}
+                                {hasScript && <Badge variant="outline" className="ml-1 px-1 text-[8px]">script</Badge>}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
                     );
                   })}
                 </div>
@@ -400,6 +483,24 @@ export default function MissionPage() {
                           <Badge key={s} variant="outline" className="gap-1 text-[10px] text-[#3dba8a] border-[#0d7a4a]/30">
                             <span className="h-1.5 w-1.5 rounded-full bg-[#3dba8a] animate-pulse" />
                             {s}
+                            <button
+                              onClick={async () => {
+                                try {
+                                  const agentRole = s.split('-').slice(1).join('-');
+                                  const res = await fetch('/api/remote-control', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ agentId: agentRole, projectId: activeProjectId }),
+                                  });
+                                  const data = await res.json();
+                                  setRemoteInfo(data);
+                                } catch { /* ignore */ }
+                              }}
+                              className="ml-1 hover:text-primary"
+                              title="Remote control"
+                            >
+                              <Radio className="h-2.5 w-2.5" />
+                            </button>
                           </Badge>
                         ))}
                       </div>
@@ -447,6 +548,46 @@ export default function MissionPage() {
                     </div>
                   )}
 
+                  {/* Launch Mode + Worktree Controls */}
+                  <div className="flex items-center gap-4 rounded-lg border border-border/50 px-3 py-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-medium text-muted-foreground">Mode:</span>
+                      <button
+                        onClick={() => setLaunchMode('tmux')}
+                        className={`flex items-center gap-1 rounded px-2 py-0.5 text-[10px] transition-colors ${
+                          launchMode === 'tmux'
+                            ? 'bg-primary/10 text-primary'
+                            : 'text-muted-foreground hover:text-foreground'
+                        }`}
+                      >
+                        <Terminal className="h-3 w-3" />
+                        tmux
+                      </button>
+                      <button
+                        onClick={() => setLaunchMode('sdk')}
+                        className={`flex items-center gap-1 rounded px-2 py-0.5 text-[10px] transition-colors ${
+                          launchMode === 'sdk'
+                            ? 'bg-primary/10 text-primary'
+                            : 'text-muted-foreground hover:text-foreground'
+                        }`}
+                      >
+                        <Cpu className="h-3 w-3" />
+                        SDK
+                      </button>
+                    </div>
+                    <div className="h-4 w-px bg-border" />
+                    <label className="flex items-center gap-1.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={useWorktree}
+                        onChange={(e) => setUseWorktree(e.target.checked)}
+                        className="h-3 w-3 rounded border-border"
+                      />
+                      <GitBranch className="h-3 w-3 text-muted-foreground" />
+                      <span className="text-[10px] text-muted-foreground">Worktree isolation</span>
+                    </label>
+                  </div>
+
                   <div className="flex gap-2">
                     {launchInfo.launchScriptExists && (
                       <Button onClick={handleLaunchAll} disabled={launching} size="sm" variant="default">
@@ -461,6 +602,32 @@ export default function MissionPage() {
                       </Button>
                     )}
                   </div>
+
+                  {/* Remote control info */}
+                  {remoteInfo && (
+                    <div className="rounded-lg border border-border/50 bg-background px-3 py-2 text-xs space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="font-medium flex items-center gap-1">
+                          <Radio className="h-3 w-3" />
+                          Remote Control — {remoteInfo.agentId}
+                        </span>
+                        <button onClick={() => setRemoteInfo(null)} className="text-muted-foreground hover:text-foreground text-[10px]">dismiss</button>
+                      </div>
+                      {remoteInfo.remoteCommand && (
+                        <code className="block rounded bg-[#0a1612] px-2 py-1 text-[10px] text-[#3dba8a]">
+                          {remoteInfo.remoteCommand}
+                        </code>
+                      )}
+                      {remoteInfo.attachCommand && (
+                        <code className="block rounded bg-[#0a1612] px-2 py-1 text-[10px] text-[#3dba8a]">
+                          {remoteInfo.attachCommand}
+                        </code>
+                      )}
+                      {remoteInfo.instructions && (
+                        <p className="text-[10px] text-muted-foreground">{remoteInfo.instructions}</p>
+                      )}
+                    </div>
+                  )}
 
                   {/* Launch result feedback */}
                   {launchResult && (

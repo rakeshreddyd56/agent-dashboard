@@ -44,7 +44,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
         id: data.id || `${data.projectId || 'unknown'}-${agentId}`,
         projectId: data.projectId || '',
         agentId,
-        role: (data.role as AgentSnapshot['role']) || 'coder',
+        role: (data.role as AgentSnapshot['role']) || 'architect',
         status: (data.status as AgentSnapshot['status']) || 'working',
         currentTask: data.currentTask,
         model: data.model,

@@ -116,9 +116,70 @@ export function checkStaleAgents(projectId: string): void {
   const tmuxSessions = getTmuxSessions();
   let changed = false;
 
+  // Grace period: don't touch agents launched less than 10 minutes ago
+  const LAUNCH_GRACE_MS = 10 * 60 * 1000;
+
   for (const agent of agents) {
     // Skip already-terminal agents
     if (agent.status === 'offline' || agent.status === 'completed') continue;
+
+    // SDK/hook agents: only check heartbeat staleness, no tmux probing
+    if (agent.hook_enabled || agent.launch_mode === 'sdk') {
+      const hbTime = agent.last_heartbeat ? new Date(agent.last_heartbeat).getTime() : 0;
+      // Longer grace period for hook-based agents (3x warning threshold = ~15min)
+      const hookStaleThreshold = HEARTBEAT_THRESHOLDS.warning * 3;
+      const isHookStale = !isNaN(hbTime) && hbTime > 0 && (now - hbTime > hookStaleThreshold);
+      if (isHookStale) {
+        const updatedAgent: AgentRow = { ...agent, status: 'completed' };
+        upsertProjectAgent(projectId, updatedAgent);
+        changed = true;
+
+        // Clean up worktree if present
+        if (agent.worktree_path) {
+          try {
+            const { removeWorktree } = require('@/lib/sdk/worktree-manager');
+            const project = require('@/lib/db').db.select().from(require('@/lib/db').schema.projects)
+              .where(require('drizzle-orm').eq(require('@/lib/db').schema.projects.id, projectId)).get();
+            if (project) removeWorktree(project.path, agent.worktree_path);
+          } catch { /* non-fatal */ }
+        }
+
+        const staleEvent: EventRow = {
+          id: `evt-hb-sdk-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          timestamp: nowIso,
+          level: 'info',
+          agent_id: agent.agent_id,
+          agent_role: agent.role,
+          message: `SDK agent ${agent.agent_id} completed (heartbeat stale)`,
+          details: null,
+        };
+        insertProjectEvent(projectId, staleEvent);
+        eventBus.broadcast('event.created', {
+          events: [{
+            id: staleEvent.id, projectId, timestamp: staleEvent.timestamp,
+            level: staleEvent.level, agentId: agent.agent_id,
+            agentRole: agent.role, message: staleEvent.message,
+          }],
+        }, projectId);
+      }
+      continue;
+    }
+
+    // Grace period for newly launched agents — let them initialize
+    const createdTime = agent.created_at ? new Date(agent.created_at).getTime() : 0;
+    if (createdTime > 0 && (now - createdTime) < LAUNCH_GRACE_MS) {
+      // Agent is still within the 10-min grace window — refresh heartbeat but don't kill
+      if (agent.status === 'initializing' || agent.status === 'working') {
+        const sessionName = tmuxSessions.find((s) => s.includes(agent.agent_id)) || '';
+        if (sessionName) {
+          // Session exists — keep alive, refresh heartbeat
+          const refreshedAgent: AgentRow = { ...agent, last_heartbeat: nowIso };
+          upsertProjectAgent(projectId, refreshedAgent);
+          changed = true;
+        }
+      }
+      continue;
+    }
 
     // Supervisors (Rataa) run in a loop — always refresh heartbeat, never mark completed
     if (agent.role === 'supervisor' || agent.role === 'supervisor-2') {
@@ -174,6 +235,21 @@ export function checkStaleAgents(projectId: string): void {
       } catch { /* session may already be gone */ }
     }
 
+    // Clean up worktree if present
+    if (agent.worktree_path) {
+      try {
+        import('@/lib/sdk/worktree-manager').then(({ removeWorktree }) => {
+          import('@/lib/db').then(({ db, schema }) => {
+            import('drizzle-orm').then(({ eq }) => {
+              const project = db.select().from(schema.projects)
+                .where(eq(schema.projects.id, projectId)).get();
+              if (project) removeWorktree((project as { path: string }).path, agent.worktree_path!);
+            });
+          });
+        });
+      } catch { /* non-fatal */ }
+    }
+
     // Mark the agent's current task as DONE if it was IN_PROGRESS
     if (agent.current_task) {
       try {
@@ -183,7 +259,7 @@ export function checkStaleAgents(projectId: string): void {
         );
         if (agentTask && agentTask.status === 'IN_PROGRESS') {
           updateProjectTask(projectId, agentTask.id, {
-            status: 'DONE',
+            status: 'REVIEW',
             updated_at: nowIso,
           });
         }

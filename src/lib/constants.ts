@@ -24,30 +24,25 @@ export const PRIORITY_CONFIG: Record<TaskPriority, { label: string; color: strin
 
 /* Agent roles — Clawbot marketplace colors (greens, oranges, blues) */
 export const AGENT_ROLES: { role: AgentRole; label: string; icon: string; color: string }[] = [
-  { role: 'architect', label: 'Architect', icon: 'Blocks', color: '#146b4e' },
-  { role: 'coder', label: 'Coder', icon: 'Code', color: '#3dba8a' },
-  { role: 'coder-2', label: 'Coder 2', icon: 'Code', color: '#5ba3c9' },
-  { role: 'reviewer', label: 'Reviewer', icon: 'Search', color: '#d5601d' },
-  { role: 'tester', label: 'Tester', icon: 'FlaskConical', color: '#0d7a4a' },
-  { role: 'security-auditor', label: 'Security', icon: 'Shield', color: '#a4312f' },
-  { role: 'devops', label: 'DevOps', icon: 'Container', color: '#8d5a0f' },
-  { role: 'coordinator', label: 'Coordinator', icon: 'Users', color: '#24556f' },
+  // Floor 1 — Research
+  { role: 'rataa-research', label: 'Robin (Research Lead)', icon: 'FlaskRound', color: '#6366f1' },
+  { role: 'researcher-1', label: 'Chopper', icon: 'BookOpen', color: '#f59e0b' },
+  { role: 'researcher-2', label: 'Brook', icon: 'BookOpen', color: '#f59e0b' },
+  { role: 'researcher-3', label: 'Jinbe', icon: 'BookOpen', color: '#f59e0b' },
+  { role: 'researcher-4', label: 'Carrot', icon: 'BookOpen', color: '#f59e0b' },
+  // Floor 2 — Development
+  { role: 'rataa-frontend', label: 'Nami (Frontend Lead)', icon: 'MonitorSmartphone', color: '#8b5cf6' },
+  { role: 'rataa-backend', label: 'Franky (Backend Lead)', icon: 'Server', color: '#7c3aed' },
+  { role: 'architect', label: 'Usopp (Architect)', icon: 'Blocks', color: '#146b4e' },
+  { role: 'frontend', label: 'Sanji (Frontend)', icon: 'Palette', color: '#06b6d4' },
+  { role: 'backend-1', label: 'Zoro (Backend)', icon: 'Database', color: '#0891b2' },
+  { role: 'backend-2', label: 'Law (Backend)', icon: 'Database', color: '#0891b2' },
+  { role: 'tester-1', label: 'Smoker (Tester)', icon: 'TestTube', color: '#10b981' },
+  { role: 'tester-2', label: 'Tashigi (Tester)', icon: 'TestTube', color: '#10b981' },
+  // Floor 3 — Ops
+  { role: 'rataa-ops', label: 'Luffy (Ops Lead)', icon: 'Rocket', color: '#a855f7' },
   { role: 'supervisor', label: 'Rataa-1 (Ops)', icon: 'Eye', color: '#9333ea' },
   { role: 'supervisor-2', label: 'Rataa-2 (Quality)', icon: 'Eye', color: '#7c3aed' },
-  // Phase 6: 3-Floor Office — One Piece crew
-  { role: 'rataa-research', label: 'Robin-Research', icon: 'FlaskRound', color: '#6366f1' },
-  { role: 'rataa-frontend', label: 'Nami-Frontend', icon: 'MonitorSmartphone', color: '#8b5cf6' },
-  { role: 'rataa-backend', label: 'Franky-Backend', icon: 'Server', color: '#7c3aed' },
-  { role: 'rataa-ops', label: 'Luffy-Ops', icon: 'Rocket', color: '#a855f7' },
-  { role: 'frontend', label: 'Sanji-Frontend', icon: 'Palette', color: '#06b6d4' },
-  { role: 'backend-1', label: 'Zoro-Backend', icon: 'Database', color: '#0891b2' },
-  { role: 'backend-2', label: 'Law-Backend', icon: 'Database', color: '#0891b2' },
-  { role: 'tester-1', label: 'Smoker-Tester', icon: 'TestTube', color: '#10b981' },
-  { role: 'tester-2', label: 'Tashigi-Tester', icon: 'TestTube', color: '#10b981' },
-  { role: 'researcher-1', label: 'Chopper-Researcher', icon: 'BookOpen', color: '#f59e0b' },
-  { role: 'researcher-2', label: 'Brook-Researcher', icon: 'BookOpen', color: '#f59e0b' },
-  { role: 'researcher-3', label: 'Jinbe-Researcher', icon: 'BookOpen', color: '#f59e0b' },
-  { role: 'researcher-4', label: 'Carrot-Researcher', icon: 'BookOpen', color: '#f59e0b' },
 ];
 
 /* Agent status — mapped to Moltbook freshness/trust semantics
@@ -80,7 +75,7 @@ export const AUTO_RELAY_CONFIG = {
   intervalMs: 60_000,
   maxRelaysPerAgent: 10,
   cooldownMs: 30_000,
-  excludedRoles: ['coordinator', 'supervisor', 'supervisor-2'] as string[],
+  excludedRoles: ['supervisor', 'supervisor-2'] as string[],
 };
 
 export const HEARTBEAT_THRESHOLDS = {
@@ -110,6 +105,24 @@ export const NAV_ITEMS = [
   { href: '/settings', label: 'Settings', icon: 'Settings' },
 ] as const;
 
+export const SDK_CONFIG = {
+  defaultModel: 'claude-sonnet-4-6',
+  maxBudgetUsd: 5.0,
+  hookEndpoint: 'http://localhost:4000/api/hooks',
+  maxConcurrentSdkAgents: 8,
+};
+
+export const HOOK_EVENT_TYPES = [
+  'SessionStart',
+  'PostToolUse',
+  'Stop',
+  'SubagentStop',
+  'TaskCompleted',
+  'Notification',
+] as const;
+
+export type HookEventType = (typeof HOOK_EVENT_TYPES)[number];
+
 export const OFFICE_CONFIG = {
   enabled: true,
   floors: { 1: 'Research & Ideation', 2: 'Development', 3: 'CI/CD & Deploy' } as Record<number, string>,
@@ -123,9 +136,9 @@ export const OFFICE_CONFIG = {
     { name: 'Llama 3.1 70B', provider: 'openrouter', model: 'meta-llama/llama-3.1-70b-instruct', role: 'member' as const },
   ],
   floorAgents: {
-    1: ['researcher-1', 'researcher-2', 'researcher-3', 'researcher-4', 'rataa-research'],
-    2: ['architect', 'frontend', 'backend-1', 'backend-2', 'tester-1', 'tester-2', 'rataa-frontend', 'rataa-backend'],
-    3: ['rataa-ops'],
+    1: ['rataa-research', 'researcher-1', 'researcher-2', 'researcher-3', 'researcher-4'],
+    2: ['rataa-frontend', 'rataa-backend', 'architect', 'frontend', 'backend-1', 'backend-2', 'tester-1', 'tester-2'],
+    3: ['rataa-ops', 'supervisor', 'supervisor-2'],
   } as Record<number, string[]>,
 } as const;
 

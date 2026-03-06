@@ -63,6 +63,17 @@ export async function GET(req: NextRequest) {
       tasksByStatus[t.status] = (tasksByStatus[t.status] || 0) + 1;
     }
 
+    // 2b. Tasks breakdown per agent (for floor metrics)
+    const tasksByAgent: Record<string, { total: number; done: number; inProgress: number }> = {};
+    for (const t of tasks) {
+      const agent = t.assigned_agent;
+      if (!agent) continue;
+      if (!tasksByAgent[agent]) tasksByAgent[agent] = { total: 0, done: 0, inProgress: 0 };
+      tasksByAgent[agent].total++;
+      if (t.status === 'DONE') tasksByAgent[agent].done++;
+      if (['IN_PROGRESS', 'REVIEW', 'TESTING', 'ASSIGNED'].includes(t.status)) tasksByAgent[agent].inProgress++;
+    }
+
     // 3. Current agent statuses
     const agents = getProjectAgents(projectId);
     const agentsByStatus: Record<string, number> = {};
@@ -91,6 +102,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       snapshots,
       tasksByStatus,
+      tasksByAgent,
       agentsByStatus,
       totalTasks: tasks.length,
       totalAgents: agents.length,
