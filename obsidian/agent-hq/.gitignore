@@ -1,0 +1,8 @@
+# Obsidian workspace (local-only, changes per device)
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
+.obsidian/core-plugins-migration.json
+
+# OS files
+.DS_Store
+Thumbs.db

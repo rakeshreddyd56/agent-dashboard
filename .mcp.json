@@ -21,7 +21,7 @@
     },
     "obsidian": {
       "command": "npx",
-      "args": ["-y", "obsidian-mcp", "/Users/rakeshreddy/ObsidianVault/agent-hq"]
+      "args": ["-y", "obsidian-mcp", "./obsidian/agent-hq"]
     }
   }
 }
