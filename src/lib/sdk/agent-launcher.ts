@@ -258,6 +258,174 @@ export function cancelSDKSession(sessionId: string): boolean {
   }
 }
 
+/**
+ * Launch a team using the --agents flag for native Claude Code subagent coordination.
+ * Reads agent definitions from .claude/agents/{role}.md and builds the --agents JSON.
+ * Spawns a single process — the lead agent orchestrates subagents automatically.
+ */
+export async function launchWithSubagents(options: {
+  projectId: string;
+  leadRole: string;
+  subagentRoles: string[];
+  prompt: string;
+  cwd: string;
+  maxBudgetUsd?: number;
+  coordinationPath: string;
+}): Promise<{ sessionId: string; agentId: string }> {
+  const {
+    projectId,
+    leadRole,
+    subagentRoles,
+    prompt,
+    cwd,
+    maxBudgetUsd = SDK_CONFIG.maxBudgetUsd,
+    coordinationPath,
+  } = options;
+
+  if (activeSessions.size >= SDK_CONFIG.maxConcurrentSdkAgents) {
+    throw new Error(`Max concurrent SDK agents (${SDK_CONFIG.maxConcurrentSdkAgents}) reached`);
+  }
+
+  // Build --agents JSON from .claude/agents/ definitions
+  const agentsDir = require('path').join(cwd, '.claude', 'agents');
+  const agentsJson: Record<string, { description: string; prompt: string; model?: string; tools?: string[] }> = {};
+
+  for (const role of subagentRoles) {
+    const agentFile = require('path').join(agentsDir, `${role}.md`);
+    try {
+      const content = require('fs').readFileSync(agentFile, 'utf-8');
+      // Parse YAML frontmatter
+      const fmMatch = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+      if (fmMatch) {
+        const frontmatter = fmMatch[1];
+        const body = fmMatch[2].trim();
+        const descMatch = frontmatter.match(/description:\s*"?([^"\n]+)"?/);
+        const modelMatch = frontmatter.match(/model:\s*(\S+)/);
+        agentsJson[role] = {
+          description: descMatch?.[1] || `Agent ${role}`,
+          prompt: body.slice(0, 4000), // Truncate for CLI arg limits
+          model: modelMatch?.[1] || 'sonnet',
+        };
+      }
+    } catch {
+      // Skip agents without definition files
+    }
+  }
+
+  if (Object.keys(agentsJson).length === 0) {
+    throw new Error('No valid agent definitions found for the specified roles');
+  }
+
+  const sessionId = `team-${leadRole}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  const agentId = leadRole;
+  const now = new Date().toISOString();
+
+  if (!projectTablesExist(projectId)) {
+    createProjectTables(projectId);
+  }
+
+  // Register lead agent
+  const agentRow: AgentRow = {
+    id: `${projectId}-${agentId}`,
+    agent_id: agentId,
+    role: leadRole,
+    status: 'initializing',
+    current_task: null,
+    model: 'opus',
+    session_start: now,
+    last_heartbeat: now,
+    locked_files: '[]',
+    progress: 0,
+    estimated_cost: 0,
+    created_at: now,
+    launch_mode: 'sdk',
+    sdk_session_id: sessionId,
+    hook_enabled: 1,
+    worktree_path: null,
+    worktree_branch: null,
+  };
+  upsertProjectAgent(projectId, agentRow);
+
+  eventBus.broadcast('agent.updated', {
+    projectId, agentId, id: agentRow.id, role: leadRole,
+    status: 'initializing', launchMode: 'subagents', sdkSessionId: sessionId,
+  }, projectId);
+
+  const args = [
+    '-p', prompt,
+    '--model', 'opus',
+    '--max-budget-usd', String(maxBudgetUsd),
+    '--agents', JSON.stringify(agentsJson),
+  ];
+
+  const childProcess = execFile('claude', args, {
+    cwd,
+    timeout: 60 * 60 * 1000, // 1 hour for team work
+    maxBuffer: 100 * 1024 * 1024,
+    env: getSpawnEnv(),
+  }, (error, stdout, stderr) => {
+    const session = activeSessions.get(sessionId);
+    if (session?.heartbeatInterval) clearInterval(session.heartbeatInterval);
+    activeSessions.delete(sessionId);
+    const completedAt = new Date().toISOString();
+
+    const updatedAgent: AgentRow = {
+      ...agentRow,
+      status: error ? 'blocked' : 'completed',
+      last_heartbeat: completedAt,
+    };
+    upsertProjectAgent(projectId, updatedAgent);
+
+    const evt: EventRow = {
+      id: `evt-team-${error ? 'err' : 'done'}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      timestamp: completedAt,
+      level: error ? 'error' : 'success',
+      agent_id: agentId,
+      agent_role: leadRole,
+      message: `Team ${leadRole} ${error ? 'error' : 'completed'}: ${subagentRoles.join(', ')}`,
+      details: (error ? stderr : stdout)?.slice(0, 1000) || null,
+    };
+    insertProjectEvent(projectId, evt);
+    eventBus.broadcast('event.created', { events: [evt] }, projectId);
+    eventBus.broadcast('agent.status_changed', {
+      projectId, agentId, status: error ? 'blocked' : 'completed',
+    }, projectId);
+    triggerRelay(projectId);
+  });
+
+  const heartbeatInterval = setInterval(() => {
+    if (!activeSessions.has(sessionId)) {
+      clearInterval(heartbeatInterval);
+      return;
+    }
+    const hbNow = new Date().toISOString();
+    const hbAgent: AgentRow = { ...agentRow, status: 'working', last_heartbeat: hbNow };
+    upsertProjectAgent(projectId, hbAgent);
+  }, 60_000);
+
+  activeSessions.set(sessionId, {
+    process: childProcess,
+    agentId,
+    projectId,
+    startedAt: Date.now(),
+    heartbeatInterval,
+  });
+
+  setTimeout(() => {
+    if (activeSessions.has(sessionId)) {
+      const workingAgent: AgentRow = {
+        ...agentRow, status: 'working', last_heartbeat: new Date().toISOString(),
+      };
+      upsertProjectAgent(projectId, workingAgent);
+      eventBus.broadcast('agent.status_changed', {
+        projectId, agentId, status: 'working',
+      }, projectId);
+    }
+  }, 3000);
+
+  return { sessionId, agentId };
+}
+
 async function triggerRelay(projectId: string) {
   try {
     const { runAutoRelay } = await import('@/lib/coordination/relay');

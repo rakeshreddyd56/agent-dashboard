@@ -32,6 +32,18 @@
         "type": "command",
         "command": "curl -s -X POST http://localhost:4000/api/hooks -H 'Content-Type: application/json' -d '{\"type\":\"Notification\",\"session_id\":\"'\"$CLAUDE_SESSION_ID\"'\",\"agent_id\":\"'\"$CLAUDE_AGENT_ID\"'\",\"project_id\":\"'\"$CLAUDE_PROJECT_ID\"'\",\"timestamp\":\"'\"$(date -u +%Y-%m-%dT%H:%M:%S.000Z)\"'\"}' 2>/dev/null || true"
       }
+    ],
+    "TeammateIdle": [
+      {
+        "type": "command",
+        "command": "curl -s -X POST http://localhost:4000/api/hooks -H 'Content-Type: application/json' -d '{\"type\":\"TeammateIdle\",\"session_id\":\"'\"$CLAUDE_SESSION_ID\"'\",\"agent_id\":\"'\"$CLAUDE_AGENT_ID\"'\",\"project_id\":\"'\"$CLAUDE_PROJECT_ID\"'\",\"agent_type\":\"'\"$CLAUDE_CODE_AGENT_TYPE\"'\",\"timestamp\":\"'\"$(date -u +%Y-%m-%dT%H:%M:%S.000Z)\"'\"}' 2>/dev/null || true"
+      }
+    ],
+    "SubagentStart": [
+      {
+        "type": "command",
+        "command": "curl -s -X POST http://localhost:4000/api/hooks -H 'Content-Type: application/json' -d '{\"type\":\"SubagentStart\",\"session_id\":\"'\"$CLAUDE_SESSION_ID\"'\",\"agent_id\":\"'\"$CLAUDE_AGENT_ID\"'\",\"project_id\":\"'\"$CLAUDE_PROJECT_ID\"'\",\"agent_type\":\"'\"$CLAUDE_CODE_AGENT_TYPE\"'\",\"timestamp\":\"'\"$(date -u +%Y-%m-%dT%H:%M:%S.000Z)\"'\"}' 2>/dev/null || true"
+      }
     ]
   }
 }

@@ -901,6 +901,49 @@ export async function POST(req: NextRequest) {
         continue;
       }
 
+      // Subagents launch mode — uses --agents flag for native Claude Code team coordination
+      if (launchModeParam === 'subagents') {
+        try {
+          const { launchWithSubagents } = await import('@/lib/sdk/agent-launcher');
+
+          // Collect all remaining roles as subagents for this lead agent
+          const remainingRoles = (agentRoles as string[])
+            .filter((r) => r !== role)
+            .map((r) => sanitizeName(r))
+            .filter((r): r is string => r !== null);
+
+          const taskInfo = taskParam as { id: string; title: string } | undefined;
+          const prompt = taskInfo?.id
+            ? `Work on task ${taskInfo.id}: ${taskInfo.title}. Coordinate your subagents to complete the work. Read .claude/coordination/TASKS.md for details.`
+            : `You are the lead agent coordinating a team. Read .claude/coordination/TASKS.md and delegate tasks to your subagents.`;
+
+          const result = await launchWithSubagents({
+            projectId: projectId as string,
+            leadRole: sanitizedRole,
+            subagentRoles: remainingRoles,
+            prompt,
+            cwd: project.path,
+            coordinationPath: project.coordinationPath,
+          });
+
+          // All roles handled by this single team process — add results for all
+          results.push({ role: sanitizedRole, status: 'launched', session: result.sessionId });
+          for (const sr of remainingRoles) {
+            results.push({ role: sr, status: 'delegated', session: result.sessionId });
+          }
+        } catch (teamErr) {
+          results.push({
+            role: sanitizedRole,
+            status: 'error',
+            error: teamErr instanceof Error ? teamErr.message : 'Subagents launch failed',
+          });
+        } finally {
+          launchingLock.delete(sessionName);
+        }
+        // Subagents mode handles all roles in one process, break out of loop
+        break;
+      }
+
       // Use task-specific relay script or standard run script
       const taskInfo = taskParam as { id: string; title: string } | undefined;
       let scriptFile: string;

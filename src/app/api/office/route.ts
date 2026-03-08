@@ -37,6 +37,18 @@ export async function GET(req: NextRequest) {
       .where(eq(schema.councilMembers.projectId, projectId))
       .all();
 
+    // Build spatial state from live agent data
+    let spatialFloors = undefined;
+    try {
+      const { projectTablesExist } = await import('@/lib/db/dynamic-tables');
+      if (projectTablesExist(projectId)) {
+        const { getProjectAgents } = await import('@/lib/db/project-queries');
+        const { buildSpatialState } = await import('@/lib/coordination/spatial-state');
+        const agents = getProjectAgents(projectId);
+        spatialFloors = buildSpatialState(agents);
+      }
+    } catch { /* non-fatal — spatial state is optional */ }
+
     return NextResponse.json({
       state: officeState.state,
       activeFloor: officeState.activeFloor,
@@ -45,6 +57,7 @@ export async function GET(req: NextRequest) {
       currentSession,
       recentSessions,
       councilMembers,
+      spatialFloors,
       config: {
         enabled: OFFICE_CONFIG.enabled,
         floors: OFFICE_CONFIG.floors,

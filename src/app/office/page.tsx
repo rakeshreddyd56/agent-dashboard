@@ -11,6 +11,7 @@ import { MemoryBrowser } from '@/components/office/memory-browser';
 import { CommunicationTimeline } from '@/components/office/communication-timeline';
 import { SoulEditor } from '@/components/office/soul-editor';
 import { RataaChatPanel } from '@/components/office/rataa-chat-panel';
+import type { FloorSpatialState } from '@/lib/coordination/spatial-state';
 import type { OfficeState, FloorNumber, ResearchIdea, CouncilVote } from '@/lib/types';
 
 const TABS = ['Floors', 'Rataa Chat', 'Research', 'Memory', 'Communications'] as const;
@@ -18,6 +19,7 @@ type Tab = typeof TABS[number];
 
 export default function OfficePage() {
   const [activeTab, setActiveTab] = useState<Tab>('Floors');
+  const [spatialFloors, setSpatialFloors] = useState<FloorSpatialState[] | undefined>();
   const activeProjectId = useProjectStore((s) => s.activeProjectId);
   const store = useOfficeStore();
 
@@ -36,6 +38,9 @@ export default function OfficePage() {
           floorStatuses: data.floorStatuses,
           councilMembers: data.councilMembers,
         });
+        if (data.spatialFloors) {
+          setSpatialFloors(data.spatialFloors);
+        }
       })
       .catch(console.error)
       .finally(() => store.setLoading(false));
@@ -118,6 +123,7 @@ export default function OfficePage() {
               floorStatuses={store.floorStatuses}
               activeFloor={store.activeFloor}
               officeState={store.officeState}
+              spatialFloors={spatialFloors}
             />
           </div>
           <div className="space-y-4">

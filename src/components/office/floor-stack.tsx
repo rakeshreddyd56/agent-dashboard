@@ -1,7 +1,8 @@
 'use client';
 
 import type { FloorNumber, OfficeState } from '@/lib/types';
-import { OFFICE_CONFIG } from '@/lib/constants';
+import type { FloorSpatialState, AgentSpatialState } from '@/lib/coordination/spatial-state';
+import { activityColor, activityEmoji } from '@/lib/coordination/spatial-state';
 
 interface FloorStatus {
   floor: FloorNumber;
@@ -13,6 +14,8 @@ interface FloorStackProps {
   floorStatuses: FloorStatus[];
   activeFloor: FloorNumber | null;
   officeState: OfficeState;
+  /** Live spatial data from agent DB — if provided, overrides static labels */
+  spatialFloors?: FloorSpatialState[];
 }
 
 const FLOOR_COLORS = {
@@ -21,6 +24,7 @@ const FLOOR_COLORS = {
   complete: { bg: 'bg-[#0d7a4a]/10', border: 'border-[#0d7a4a]', text: 'text-[#3dba8a]' },
 };
 
+// Fallback static agents — used when no spatial data is available
 const FLOOR_AGENTS: Record<number, { role: string; label: string }[]> = {
   3: [
     { role: 'rataa-ops', label: 'Luffy-Ops' },
@@ -44,7 +48,29 @@ const FLOOR_AGENTS: Record<number, { role: string; label: string }[]> = {
   ],
 };
 
-export function FloorStack({ floorStatuses, activeFloor, officeState }: FloorStackProps) {
+function AgentChip({ agent }: { agent: AgentSpatialState }) {
+  const colorClass = activityColor(agent.activity);
+  const emoji = activityEmoji(agent.activity);
+  const isLead = agent.role.startsWith('rataa') || agent.role.startsWith('supervisor');
+
+  return (
+    <div
+      className={`text-xs px-2 py-1.5 rounded border transition-all duration-300 ${colorClass}`}
+      title={agent.currentTask ? `Working on: ${agent.currentTask}` : `${agent.character} — ${agent.activity}`}
+    >
+      <span className="mr-1">{emoji}</span>
+      {isLead ? '👔 ' : ''}
+      {agent.label}
+      {agent.currentTask && (
+        <span className="ml-1 text-[10px] opacity-70 truncate max-w-[120px] inline-block align-bottom">
+          [{agent.currentTask}]
+        </span>
+      )}
+    </div>
+  );
+}
+
+export function FloorStack({ floorStatuses, activeFloor, officeState, spatialFloors }: FloorStackProps) {
   // Render floors top-down (3, 2, 1)
   const sortedFloors = [...floorStatuses].sort((a, b) => b.floor - a.floor);
 
@@ -52,8 +78,11 @@ export function FloorStack({ floorStatuses, activeFloor, officeState }: FloorSta
     <div className="space-y-3">
       {sortedFloors.map((floor) => {
         const colors = FLOOR_COLORS[floor.status];
-        const agents = FLOOR_AGENTS[floor.floor] || [];
         const isActive = floor.floor === activeFloor;
+
+        // Use spatial data if available, otherwise fall back to static list
+        const spatialFloor = spatialFloors?.find((sf) => sf.floor === floor.floor);
+        const staticAgents = FLOOR_AGENTS[floor.floor] || [];
 
         return (
           <div
@@ -68,6 +97,11 @@ export function FloorStack({ floorStatuses, activeFloor, officeState }: FloorSta
                 <span className="text-sm text-muted-foreground">
                   {floor.label}
                 </span>
+                {spatialFloor && spatialFloor.activeCount > 0 && (
+                  <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-[#6366f1]/10 text-[#6366f1]">
+                    {spatialFloor.activeCount}/{spatialFloor.totalCount} active
+                  </span>
+                )}
               </div>
               <span className={`text-xs font-medium px-2 py-1 rounded-full ${
                 floor.status === 'active' ? 'bg-[#6366f1]/20 text-[#6366f1]' :
@@ -81,19 +115,24 @@ export function FloorStack({ floorStatuses, activeFloor, officeState }: FloorSta
               </span>
             </div>
 
-            {/* Agent Grid */}
+            {/* Agent Grid — live or static */}
             <div className="flex flex-wrap gap-2">
-              {agents.map((agent) => (
-                <div
-                  key={agent.role}
-                  className={`text-xs px-2 py-1 rounded border ${
-                    isActive ? 'bg-background/50 border-border' : 'bg-muted/50 border-transparent'
-                  }`}
-                >
-                  {agent.role.startsWith('rataa') ? '👔 ' : '🧑‍💻 '}
-                  {agent.label}
-                </div>
-              ))}
+              {spatialFloor
+                ? spatialFloor.agents.map((agent) => (
+                    <AgentChip key={agent.role} agent={agent} />
+                  ))
+                : staticAgents.map((agent) => (
+                    <div
+                      key={agent.role}
+                      className={`text-xs px-2 py-1 rounded border ${
+                        isActive ? 'bg-background/50 border-border' : 'bg-muted/50 border-transparent'
+                      }`}
+                    >
+                      {agent.role.startsWith('rataa') ? '👔 ' : '🧑‍💻 '}
+                      {agent.label}
+                    </div>
+                  ))
+              }
             </div>
           </div>
         );

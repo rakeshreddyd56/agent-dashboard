@@ -204,6 +204,51 @@ export async function POST(req: NextRequest) {
         break;
       }
 
+      case 'TeammateIdle': {
+        // Agent Teams teammate is about to go idle — check if there's more work
+        if (agent) {
+          try {
+            const { getProjectTasks } = await import('@/lib/db/project-queries');
+            const tasks = getProjectTasks(projectId);
+            const pendingTasks = tasks.filter((t) =>
+              ['TODO', 'ASSIGNED', 'BACKLOG'].includes(t.status) && !t.assigned_agent
+            );
+            if (pendingTasks.length > 0) {
+              // There's work to do — trigger relay to assign it
+              triggerPostCompletionRelay(projectId);
+            }
+          } catch { /* non-fatal */ }
+
+          const evt: EventRow = {
+            id: `evt-idle-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            timestamp: now,
+            level: 'info',
+            agent_id: agent.agent_id,
+            agent_role: agent.role,
+            message: `Agent ${agent.agent_id} teammate idle`,
+            details: JSON.stringify({ agentType: body.agent_type }),
+          };
+          insertProjectEvent(projectId, evt);
+        }
+        break;
+      }
+
+      case 'SubagentStart': {
+        // A subagent was spawned — register it immediately
+        const agentType = body.agent_type || 'unknown';
+        const evt: EventRow = {
+          id: `evt-substart-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          timestamp: now,
+          level: 'info',
+          agent_id: agentId || agentType,
+          agent_role: agent?.role || null,
+          message: `Subagent started: ${agentType} (parent: ${agentId || 'unknown'})`,
+          details: JSON.stringify({ sessionId, agentType }),
+        };
+        insertProjectEvent(projectId, evt);
+        break;
+      }
+
       default:
         // Unknown hook type — log but don't error
         break;

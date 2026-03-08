@@ -10,7 +10,7 @@ export type AgentRole =
 
 export type AgentStatus = 'initializing' | 'planning' | 'working' | 'blocked' | 'reviewing' | 'completed' | 'idle' | 'offline';
 
-export type LaunchMode = 'tmux' | 'sdk';
+export type LaunchMode = 'tmux' | 'sdk' | 'subagents';
 
 export type TaskStatus = 'BACKLOG' | 'TODO' | 'ASSIGNED' | 'IN_PROGRESS' | 'REVIEW' | 'QUALITY_REVIEW' | 'TESTING' | 'FAILED' | 'TESTED' | 'DONE';
 

@@ -107,7 +107,7 @@ export default function MissionPage() {
   const [selectedRoles, setSelectedRoles] = useState<Set<string>>(new Set());
 
   // Launch mode + worktree
-  const [launchMode, setLaunchMode] = useState<'tmux' | 'sdk'>('tmux');
+  const [launchMode, setLaunchMode] = useState<'tmux' | 'sdk' | 'subagents'>('tmux');
   const [useWorktree, setUseWorktree] = useState(false);
   const [remoteInfo, setRemoteInfo] = useState<Record<string, string> | null>(null);
 
@@ -573,6 +573,17 @@ export default function MissionPage() {
                       >
                         <Cpu className="h-3 w-3" />
                         SDK
+                      </button>
+                      <button
+                        onClick={() => setLaunchMode('subagents')}
+                        className={`flex items-center gap-1 rounded px-2 py-0.5 text-[10px] transition-colors ${
+                          launchMode === 'subagents'
+                            ? 'bg-primary/10 text-primary'
+                            : 'text-muted-foreground hover:text-foreground'
+                        }`}
+                      >
+                        <Users className="h-3 w-3" />
+                        Teams
                       </button>
                     </div>
                     <div className="h-4 w-px bg-border" />

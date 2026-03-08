@@ -18,6 +18,10 @@
     "notion": {
       "type": "url",
       "url": "https://mcp.notion.com/mcp"
+    },
+    "obsidian": {
+      "command": "npx",
+      "args": ["-y", "obsidian-mcp", "/Users/rakeshreddy/ObsidianVault/agent-hq"]
     }
   }
 }

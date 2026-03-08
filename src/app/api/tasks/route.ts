@@ -122,7 +122,14 @@ export async function POST(req: NextRequest) {
     };
 
     eventBus.broadcast('task.created', task, projectId as string);
-    return NextResponse.json(task, { status: 201 });
+    return NextResponse.json({
+      ...task,
+      undo: {
+        method: 'DELETE',
+        url: `/api/tasks?id=${id}&projectId=${projectId}`,
+        description: `Delete task "${title}"`,
+      },
+    }, { status: 201 });
   } catch (err) {
     console.error('POST /api/tasks error:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
@@ -186,11 +193,28 @@ export async function PATCH(req: NextRequest) {
       }, projectId as string);
     }
 
+    // Build undo payload from the previous state
+    const undoBody: Record<string, unknown> = { id, projectId };
+    if (updates.status !== undefined) undoBody.status = existing.status;
+    if (updates.priority !== undefined) undoBody.priority = existing.priority;
+    if (updates.title !== undefined) undoBody.title = existing.title;
+    if (updates.description !== undefined) undoBody.description = existing.description;
+    if (updates.assignedAgent !== undefined) undoBody.assignedAgent = existing.assigned_agent;
+    if (updates.tags !== undefined) undoBody.tags = JSON.parse(existing.tags || '[]');
+    if (updates.effort !== undefined) undoBody.effort = existing.effort;
+    if (updates.columnOrder !== undefined) undoBody.columnOrder = existing.column_order;
+
     return NextResponse.json(updated ? {
       ...updated,
       projectId,
       tags: JSON.parse(updated.tags || '[]'),
       dependencies: JSON.parse(updated.dependencies || '[]'),
+      undo: {
+        method: 'PATCH',
+        url: '/api/tasks',
+        body: undoBody,
+        description: `Revert task "${updated.title}" changes`,
+      },
     } : null);
   } catch (err) {
     console.error('PATCH /api/tasks error:', err);
@@ -213,7 +237,25 @@ export async function DELETE(req: NextRequest) {
       eventBus.broadcast('task.deleted', { id }, projectId);
     }
 
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({
+      ok: true,
+      undo: task ? {
+        method: 'POST',
+        url: '/api/tasks',
+        body: {
+          projectId,
+          title: task.title,
+          description: task.description,
+          status: task.status,
+          priority: task.priority,
+          assignedAgent: task.assigned_agent,
+          tags: JSON.parse(task.tags || '[]'),
+          effort: task.effort,
+          dependencies: JSON.parse(task.dependencies || '[]'),
+        },
+        description: `Recreate task "${task.title}"`,
+      } : undefined,
+    });
   } catch (err) {
     console.error('DELETE /api/tasks error:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
