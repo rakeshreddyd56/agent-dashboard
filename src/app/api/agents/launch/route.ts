@@ -22,7 +22,7 @@ function sanitizeName(name: string): string | null {
 // Generate a task-specific runner script for relay launches
 // Sanitize text for safe embedding in shell scripts
 function sanitizeForShell(text: string): string {
-  return text.replace(/['"\\`$!]/g, '').replace(/[^a-zA-Z0-9 ._:,;()\-/]/g, '').slice(0, 200);
+  return text.replace(/[^a-zA-Z0-9 ._,\-]/g, '').slice(0, 200);
 }
 
 // Role-specific capabilities and focus areas for mission-aware prompts
@@ -102,6 +102,16 @@ const ROLE_CAPABILITIES: Record<string, { focus: string; skills: string; collabo
     focus: 'Operations coordination, deployment, monitoring, and infrastructure management',
     skills: 'CI/CD, deployment automation, monitoring, log analysis, incident response, infrastructure as code',
     collaboration: 'YOU LEAD Floor 3 (Ops Center). You handle deployments and infrastructure. Coordinate with supervisor (Rataa-1) for agent lifecycle and supervisor-2 (Rataa-2) for quality gates. Message rataa-frontend and rataa-backend on Floor 2 for deployment readiness. Message rataa-research on Floor 1 for infrastructure research needs.',
+  },
+  supervisor: {
+    focus: 'Agent lifecycle management, task queue coordination, and cross-floor oversight',
+    skills: 'Agent monitoring, task assignment, progress tracking, quality gates, cross-team coordination',
+    collaboration: 'You are Rataa-1 on Floor 3 (Ops Center). Your lead is rataa-ops (Luffy). Monitor all agent statuses via list-agents and full-status. Assign pending tasks to idle agents. Ensure quality gates are met before closing tasks. Report blockers to rataa-ops.',
+  },
+  'supervisor-2': {
+    focus: 'Quality assurance, code review coordination, and standards enforcement',
+    skills: 'Code review, quality metrics, testing oversight, standards enforcement, review workflow management',
+    collaboration: 'You are Rataa-2 on Floor 3 (Ops Center). Your lead is rataa-ops (Luffy). Review completed tasks via get-reviews. Ensure all tasks pass quality gates before DONE. Coordinate with tester-1 and tester-2 on Floor 2 for test coverage. Submit reviews via submit-review.',
   },
 };
 

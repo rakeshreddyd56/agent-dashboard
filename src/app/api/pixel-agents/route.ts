@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
@@ -41,10 +41,10 @@ function checkVSCodeCLI(): { available: boolean; path: string | null; editor: st
   for (const candidate of candidates) {
     if (fs.existsSync(candidate)) {
       try {
-        const version = execSync(`"${candidate}" --version 2>/dev/null | head -1`, {
+        const version = execFileSync(candidate, ['--version'], {
           encoding: 'utf-8',
           timeout: 3000,
-        }).trim();
+        }).trim().split('\n')[0];
         // Cursor versions are 2.x, VS Code is 1.x
         const isCursor = version.startsWith('2.');
         if (!isCursor) {
@@ -56,10 +56,14 @@ function checkVSCodeCLI(): { available: boolean; path: string | null; editor: st
 
   // Fall back to whatever `code` or `cursor` resolves to
   try {
-    const codePath = execSync('which code 2>/dev/null || which cursor 2>/dev/null', {
-      encoding: 'utf-8',
-      timeout: 3000,
-    }).trim();
+    let codePath = '';
+    try {
+      codePath = execFileSync('which', ['code'], { encoding: 'utf-8', timeout: 3000 }).trim();
+    } catch {
+      try {
+        codePath = execFileSync('which', ['cursor'], { encoding: 'utf-8', timeout: 3000 }).trim();
+      } catch { /* neither found */ }
+    }
     return { available: !!codePath, path: codePath || null, editor: 'Unknown' };
   } catch {
     return { available: false, path: null, editor: 'None' };
@@ -129,7 +133,7 @@ export async function GET(req: NextRequest) {
       }
 
       try {
-        execSync(`"${cli.path}" --install-extension pablodelucca.pixel-agents 2>&1`, {
+        execFileSync(cli.path, ['--install-extension', 'pablodelucca.pixel-agents'], {
           encoding: 'utf-8',
           timeout: 60000,
         });
@@ -157,10 +161,10 @@ export async function POST() {
   }
 
   try {
-    const output = execSync(`"${cli.path}" --install-extension pablodelucca.pixel-agents 2>&1`, {
+    const output = execFileSync(cli.path, ['--install-extension', 'pablodelucca.pixel-agents'], {
       encoding: 'utf-8',
       timeout: 60000,
-    });
+    }).toString();
     return NextResponse.json({ success: true, output: output.trim(), editor: cli.editor });
   } catch (err) {
     return NextResponse.json({

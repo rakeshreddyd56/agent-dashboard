@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db, schema } from '@/lib/db';
 import { eq, and, desc } from 'drizzle-orm';
 import { eventBus } from '@/lib/events/event-bus';
+import { getProjectTask, updateProjectTask } from '@/lib/db/project-queries';
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -58,12 +59,10 @@ export async function POST(req: NextRequest) {
 
   // If approved and task is in QUALITY_REVIEW, auto-advance to DONE
   if (status === 'approved') {
-    const task = db.select().from(schema.tasks)
-      .where(and(eq(schema.tasks.id, taskId), eq(schema.tasks.projectId, projectId)))
-      .get();
+    const task = getProjectTask(projectId, taskId);
 
     if (task && task.status === 'QUALITY_REVIEW') {
-      db.update(schema.tasks).set({ status: 'DONE', updatedAt: now }).where(eq(schema.tasks.id, taskId)).run();
+      updateProjectTask(projectId, taskId, { status: 'DONE', updated_at: now });
       eventBus.broadcast('task.status_changed', {
         id: taskId, title: task.title, status: 'DONE', previousStatus: 'QUALITY_REVIEW',
       }, projectId);

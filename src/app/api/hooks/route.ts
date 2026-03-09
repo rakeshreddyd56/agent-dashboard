@@ -2,11 +2,24 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getProjectAgents, upsertProjectAgent, insertProjectEvent } from '@/lib/db/project-queries';
 import { projectTablesExist } from '@/lib/db/dynamic-tables';
 import { eventBus } from '@/lib/events/event-bus';
+import { validateAuth } from '@/lib/auth';
 import type { AgentRow, EventRow } from '@/lib/db/project-queries';
 
 // Debounce: skip PostToolUse heartbeat refresh if last one was <5s ago
 const lastHeartbeatRefresh = new Map<string, number>();
 const HEARTBEAT_DEBOUNCE_MS = 5000;
+const HEARTBEAT_CLEANUP_INTERVAL = 60_000;
+let lastCleanup = Date.now();
+
+function cleanupHeartbeatMap() {
+  const now = Date.now();
+  if (now - lastCleanup < HEARTBEAT_CLEANUP_INTERVAL) return;
+  lastCleanup = now;
+  const staleThreshold = now - 300_000; // 5 minutes
+  for (const [key, ts] of lastHeartbeatRefresh) {
+    if (ts < staleThreshold) lastHeartbeatRefresh.delete(key);
+  }
+}
 
 /**
  * Resolve an agent from the DB given hook payload fields.
@@ -36,6 +49,10 @@ function resolveAgent(
 }
 
 export async function POST(req: NextRequest) {
+  // Auth check — when DASHBOARD_API_SECRET is set, hooks must authenticate
+  const authError = validateAuth(req);
+  if (authError) return authError;
+
   try {
     let body: Record<string, string | undefined>;
     try {
@@ -68,6 +85,8 @@ export async function POST(req: NextRequest) {
 
     const agents = getProjectAgents(projectId);
     const agent = resolveAgent(agents, sessionId, agentId);
+
+    cleanupHeartbeatMap();
 
     switch (type) {
       case 'SessionStart': {
@@ -115,6 +134,23 @@ export async function POST(req: NextRequest) {
             last_heartbeat: now,
           };
           upsertProjectAgent(projectId, updated);
+
+          // Kill tmux session immediately on completion
+          try {
+            const { execFileSync } = await import('child_process');
+            const tmuxSessions = (() => {
+              try {
+                return execFileSync('tmux', ['ls'], { encoding: 'utf-8', timeout: 3000, stdio: ['pipe', 'pipe', 'pipe'] })
+                  .trim().split('\n').map(l => l.split(':')[0]);
+              } catch { return []; }
+            })();
+            const session = tmuxSessions.find(s => s === agent.agent_id || s.endsWith('-' + agent.agent_id));
+            if (session) {
+              execFileSync('tmux', ['kill-session', '-t', session], {
+                encoding: 'utf-8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'],
+              });
+            }
+          } catch { /* non-fatal */ }
 
           const evt: EventRow = {
             id: `evt-hook-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -178,6 +214,23 @@ export async function POST(req: NextRequest) {
           };
           upsertProjectAgent(projectId, updated);
 
+          // Kill tmux session immediately on completion
+          try {
+            const { execFileSync } = await import('child_process');
+            const tmuxSessions = (() => {
+              try {
+                return execFileSync('tmux', ['ls'], { encoding: 'utf-8', timeout: 3000, stdio: ['pipe', 'pipe', 'pipe'] })
+                  .trim().split('\n').map(l => l.split(':')[0]);
+              } catch { return []; }
+            })();
+            const session = tmuxSessions.find(s => s === agent.agent_id || s.endsWith('-' + agent.agent_id));
+            if (session) {
+              execFileSync('tmux', ['kill-session', '-t', session], {
+                encoding: 'utf-8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'],
+              });
+            }
+          } catch { /* non-fatal */ }
+
           triggerPostCompletionRelay(projectId);
         }
         break;
@@ -188,8 +241,8 @@ export async function POST(req: NextRequest) {
         try {
           const { rawDb } = await import('@/lib/db');
           rawDb.prepare(`
-            INSERT INTO notifications (id, project_id, recipient, type, title, message, source_type, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO notifications (id, project_id, recipient, type, title, message, source_type, source_id, read_at, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `).run(
             `notif-hook-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
             projectId,
@@ -198,6 +251,8 @@ export async function POST(req: NextRequest) {
             `Notification from ${agentId || 'agent'}`,
             body.result || 'Agent notification',
             'hook',
+            null,
+            null,
             now,
           );
         } catch { /* non-fatal */ }

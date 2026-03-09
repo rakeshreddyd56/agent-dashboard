@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db, schema } from '@/lib/db';
 import { eq, and, desc } from 'drizzle-orm';
 import { OFFICE_CONFIG } from '@/lib/constants';
+import { validateAuth } from '@/lib/auth';
 
 export async function GET(req: NextRequest) {
   const projectId = req.nextUrl.searchParams.get('projectId');
@@ -65,11 +66,15 @@ export async function GET(req: NextRequest) {
       },
     });
   } catch (err) {
-    return NextResponse.json({ error: String(err) }, { status: 500 });
+    console.error('GET /api/office error:', err);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
 export async function POST(req: NextRequest) {
+  const authError = validateAuth(req);
+  if (authError) return authError;
+
   try {
     const body = await req.json();
     const { projectId, action } = body;
@@ -86,9 +91,10 @@ export async function POST(req: NextRequest) {
         return NextResponse.json(result);
       }
       default:
-        return NextResponse.json({ error: `Unknown action: ${action}` }, { status: 400 });
+        return NextResponse.json({ error: 'Unknown action' }, { status: 400 });
     }
   } catch (err) {
-    return NextResponse.json({ error: String(err) }, { status: 500 });
+    console.error('POST /api/office error:', err);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

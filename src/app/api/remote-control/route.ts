@@ -52,7 +52,7 @@ export async function GET(req: NextRequest) {
     const sessions = agents
       .filter((a) => a.status === 'working' || a.status === 'initializing' || a.status === 'planning' || a.status === 'reviewing')
       .map((agent) => {
-        const sessionName = tmuxSessions.find((s) => s.includes(agent.agent_id)) || `${prefix}-${agent.agent_id}`;
+        const sessionName = tmuxSessions.find((s) => s === agent.agent_id || s.endsWith('-' + agent.agent_id)) || `${prefix}-${agent.agent_id}`;
         const isLive = tmuxSessions.includes(sessionName);
 
         return {
@@ -107,7 +107,7 @@ export async function POST(req: NextRequest) {
 
     const tmuxSessions = getTmuxSessions();
     const prefix = getProjectPrefix(project.name);
-    const sessionName = tmuxSessions.find((s) => s.includes(agent.agent_id)) || `${prefix}-${agent.agent_id}`;
+    const sessionName = tmuxSessions.find((s) => s === agent.agent_id || s.endsWith('-' + agent.agent_id)) || `${prefix}-${agent.agent_id}`;
     const isLive = tmuxSessions.includes(sessionName);
 
     if (agent.launch_mode === 'sdk') {

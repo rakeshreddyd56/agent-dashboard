@@ -82,9 +82,15 @@ export function updateProjectTask(projectId: string, taskId: string, updates: Pa
   const setClauses: string[] = [];
   const values: unknown[] = [];
 
+  const ALLOWED_UPDATE_COLUMNS = new Set([
+    'title', 'description', 'status', 'priority', 'assigned_agent',
+    'tags', 'effort', 'dependencies', 'column_order', 'updated_at',
+  ]);
+
   for (const [key, val] of Object.entries(updates)) {
     if (val !== undefined) {
-      setClauses.push(`${key} = ?`);
+      if (!ALLOWED_UPDATE_COLUMNS.has(key)) continue;
+      setClauses.push(`"${key}" = ?`);
       values.push(val);
     }
   }

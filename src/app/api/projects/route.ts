@@ -7,6 +7,7 @@ import { cleanupProject } from '@/lib/coordination/sync-engine';
 import { seedCoordination } from '@/lib/coordination/seed-coordination';
 import { setupGitRepo } from '@/lib/git/setup';
 import { createProjectTables, dropProjectTables, projectTablesExist } from '@/lib/db/dynamic-tables';
+import { validateAuth } from '@/lib/auth';
 import fs from 'fs';
 
 // One-time initialization flag
@@ -55,6 +56,9 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  const authError = validateAuth(req);
+  if (authError) return authError;
+
   try {
     let body: Record<string, unknown>;
     try {
@@ -143,6 +147,9 @@ export async function POST(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
+  const authError = validateAuth(req);
+  if (authError) return authError;
+
   try {
     const { searchParams } = new URL(req.url);
     const id = searchParams.get('id');
@@ -162,6 +169,12 @@ export async function DELETE(req: NextRequest) {
     db.delete(schema.events).where(eq(schema.events.projectId, id)).run();
     db.delete(schema.fileLocks).where(eq(schema.fileLocks.projectId, id)).run();
     db.delete(schema.analyticsSnapshots).where(eq(schema.analyticsSnapshots.projectId, id)).run();
+    // Clean up all shared tables referencing this project
+    db.delete(schema.messages).where(eq(schema.messages.projectId, id)).run();
+    db.delete(schema.conversations).where(eq(schema.conversations.projectId, id)).run();
+    db.delete(schema.notifications).where(eq(schema.notifications.projectId, id)).run();
+    db.delete(schema.qualityReviews).where(eq(schema.qualityReviews.projectId, id)).run();
+    db.delete(schema.standupReports).where(eq(schema.standupReports.projectId, id)).run();
     db.delete(schema.projects).where(eq(schema.projects.id, id)).run();
 
     return NextResponse.json({ ok: true });

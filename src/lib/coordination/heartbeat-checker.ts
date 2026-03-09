@@ -170,7 +170,7 @@ export function checkStaleAgents(projectId: string): void {
     if (createdTime > 0 && (now - createdTime) < LAUNCH_GRACE_MS) {
       // Agent is still within the 10-min grace window — refresh heartbeat but don't kill
       if (agent.status === 'initializing' || agent.status === 'working') {
-        const sessionName = tmuxSessions.find((s) => s.includes(agent.agent_id)) || '';
+        const sessionName = tmuxSessions.find((s) => s === agent.agent_id || s.endsWith('-' + agent.agent_id)) || '';
         if (sessionName) {
           // Session exists — keep alive, refresh heartbeat
           const refreshedAgent: AgentRow = { ...agent, last_heartbeat: nowIso };
@@ -199,7 +199,7 @@ export function checkStaleAgents(projectId: string): void {
     if (!isStale) continue;
 
     // Find matching tmux session
-    const sessionName = tmuxSessions.find((s) => s.includes(agent.agent_id)) || '';
+    const sessionName = tmuxSessions.find((s) => s === agent.agent_id || s.endsWith('-' + agent.agent_id)) || '';
     const sessionAlive = !!sessionName;
 
     if (sessionAlive && !isTmuxSessionIdle(sessionName)) {

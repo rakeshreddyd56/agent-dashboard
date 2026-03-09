@@ -59,6 +59,11 @@ export async function POST(req: NextRequest) {
   const body = await req.json();
   const { projectId, fromAgent, toAgent, content, messageType, metadata } = body;
 
+  // Input size limits
+  if (typeof content === 'string' && content.length > 10000) {
+    return NextResponse.json({ error: 'content too long (max 10000 chars)' }, { status: 400 });
+  }
+
   if (!projectId || !fromAgent || !content) {
     return NextResponse.json({ error: 'projectId, fromAgent, and content required' }, { status: 400 });
   }
@@ -124,6 +129,16 @@ export async function PUT(req: NextRequest) {
   const now = new Date().toISOString();
   let updated = 0;
 
+  // Get projectId from first message for SSE broadcast
+  let broadcastProjectId = '';
+  if (messageIds.length > 0) {
+    const firstMsg = db.select({ projectId: schema.messages.projectId })
+      .from(schema.messages)
+      .where(eq(schema.messages.id, messageIds[0]))
+      .get();
+    if (firstMsg) broadcastProjectId = firstMsg.projectId;
+  }
+
   for (const msgId of messageIds) {
     const result = db.update(schema.messages)
       .set({ readAt: now })
@@ -135,7 +150,7 @@ export async function PUT(req: NextRequest) {
     updated += result.changes;
   }
 
-  eventBus.broadcast('message.read', { messageIds, agentId }, '');
+  eventBus.broadcast('message.read', { messageIds, agentId }, broadcastProjectId);
 
   return NextResponse.json({ success: true, updated });
 }

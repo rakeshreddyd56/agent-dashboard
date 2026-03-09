@@ -3,7 +3,15 @@ import { db, schema } from '@/lib/db';
 import { eq } from 'drizzle-orm';
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 import { eventBus } from '@/lib/events/event-bus';
+import { validateAuth } from '@/lib/auth';
+
+function atomicWriteFileSync(filePath: string, data: string) {
+  const tmpPath = path.join(os.tmpdir(), `.mission-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.tmp`);
+  fs.writeFileSync(tmpPath, data, 'utf-8');
+  fs.renameSync(tmpPath, filePath);
+}
 
 function getMissionPath(coordinationPath: string): string {
   return path.join(coordinationPath, 'mission.json');
@@ -42,6 +50,9 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const authError = validateAuth(req);
+  if (authError) return authError;
+
   const body = await req.json();
   const { projectId, goal, techStack, deliverables, agentTeam } = body;
 
@@ -75,7 +86,7 @@ export async function POST(req: NextRequest) {
   }
 
   const missionPath = getMissionPath(coordDir);
-  fs.writeFileSync(missionPath, JSON.stringify(mission, null, 2), 'utf-8');
+  atomicWriteFileSync(missionPath, JSON.stringify(mission, null, 2));
 
   // Emit SSE event
   eventBus.broadcast('mission.updated', { mission }, projectId);
@@ -104,6 +115,9 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PUT(req: NextRequest) {
+  const authError = validateAuth(req);
+  if (authError) return authError;
+
   const body = await req.json();
   const { projectId, ...updates } = body;
 
@@ -146,7 +160,7 @@ export async function PUT(req: NextRequest) {
     updatedAt: new Date().toISOString(),
   };
 
-  fs.writeFileSync(missionPath, JSON.stringify(mission, null, 2), 'utf-8');
+  atomicWriteFileSync(missionPath, JSON.stringify(mission, null, 2));
   eventBus.broadcast('mission.updated', { mission }, projectId);
 
   // Notify all working agents about mission update

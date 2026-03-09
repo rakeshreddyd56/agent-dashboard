@@ -22,7 +22,8 @@ export async function GET(req: NextRequest) {
     // Validate path to prevent traversal attacks
     const resolvedCoord = path.resolve(project.coordinationPath);
     const resolvedFile = path.resolve(path.join(project.coordinationPath, file));
-    if (!resolvedFile.startsWith(resolvedCoord + path.sep) && resolvedFile !== resolvedCoord) {
+    const relative = path.relative(resolvedCoord, resolvedFile);
+    if (relative.startsWith('..') || path.isAbsolute(relative)) {
       return NextResponse.json({ error: 'Invalid file path' }, { status: 400 });
     }
 

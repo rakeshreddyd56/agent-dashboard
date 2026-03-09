@@ -110,11 +110,24 @@ async function relaunchAgent(
   }
 }
 
+const relayLocks = new Map<string, boolean>();
+
 /** Run auto-relay for a project: check completed agents, relaunch with next task */
 export async function runAutoRelay(projectId: string): Promise<{ relayed: number; skipped: number; noTasks: number }> {
   if (!AUTO_RELAY_CONFIG.enabled) return { relayed: 0, skipped: 0, noTasks: 0 };
   if (!projectTablesExist(projectId)) return { relayed: 0, skipped: 0, noTasks: 0 };
 
+  // Per-project relay lock to prevent double task assignment
+  if (relayLocks.get(projectId)) return { relayed: 0, skipped: 0, noTasks: 0 };
+  relayLocks.set(projectId, true);
+  try {
+    return await _runAutoRelayInner(projectId);
+  } finally {
+    relayLocks.set(projectId, false);
+  }
+}
+
+async function _runAutoRelayInner(projectId: string): Promise<{ relayed: number; skipped: number; noTasks: number }> {
   const agents = getProjectAgents(projectId);
   let relayed = 0;
   let skipped = 0;
@@ -182,6 +195,15 @@ export async function runAutoRelay(projectId: string): Promise<{ relayed: number
   }
 
   return { relayed, skipped, noTasks };
+}
+
+/** Clear relay counters for a specific project (called on project cleanup) */
+export function clearRelayCounters(projectId: string): void {
+  for (const key of relayCounters.keys()) {
+    if (key.startsWith(projectId + ':')) {
+      relayCounters.delete(key);
+    }
+  }
 }
 
 /** Get relay status for API/debugging */

@@ -288,7 +288,7 @@ export async function GET(req: NextRequest) {
       const tasksByStatus: Record<string, number> = {};
       for (const t of floorTasks) tasksByStatus[t.status] = (tasksByStatus[t.status] || 0) + 1;
 
-      const floorNames: Record<number, string> = { 1: 'Research Lab', 2: 'Dev Floor', 3: 'Ops Center' };
+      const floorNames = OFFICE_CONFIG.floors as Record<number, string>;
 
       return NextResponse.json({
         floor: floor || 'all',
@@ -310,7 +310,7 @@ export async function GET(req: NextRequest) {
         const floorRoles = (OFFICE_CONFIG.floorAgents as Record<number, string[]>)[floorNum] || [];
         const fAgents = agents.filter((a) => floorRoles.includes(a.agent_id) || floorRoles.includes(a.role));
         const fTasks = tasks.filter((t) => fAgents.some((a) => t.assigned_agent === a.agent_id));
-        const floorNames: Record<number, string> = { 1: 'Research Lab', 2: 'Dev Floor', 3: 'Ops Center' };
+        const floorNames = OFFICE_CONFIG.floors as Record<number, string>;
 
         return {
           floor: floorNum,
@@ -404,7 +404,7 @@ export async function GET(req: NextRequest) {
         sessions = output ? output.split('\n').map((l) => l.split(':')[0]) : [];
       } catch { sessions = []; }
 
-      const session = sessions.find((s) => s.includes(agentId));
+      const session = sessions.find((s) => s === agentId || s.endsWith('-' + agentId));
       if (!session) {
         return NextResponse.json({ agentId, session: null, output: null, error: 'No tmux session found' });
       }
@@ -458,6 +458,18 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
+
+  // Input size limits
+  if (body.content && typeof body.content === 'string' && body.content.length > 10000) {
+    return NextResponse.json({ error: 'content too long (max 10000 chars)' }, { status: 400 });
+  }
+  if (body.title && typeof body.title === 'string' && body.title.length > 500) {
+    return NextResponse.json({ error: 'title too long (max 500 chars)' }, { status: 400 });
+  }
+  if (body.description && typeof body.description === 'string' && body.description.length > 5000) {
+    return NextResponse.json({ error: 'description too long (max 5000 chars)' }, { status: 400 });
+  }
+
   const { action, projectId } = body;
 
   if (!projectId || !action) {

@@ -32,6 +32,7 @@ const EVENT_TYPE_MAP: Record<string, SSEEventType> = {
   'mission.updated': 'mission:update',
   // Phase 3+
   'message.created': 'message:new',
+  'message.read': 'notification:read',
   'notification.created': 'notification:new',
   'notification.read': 'notification:read',
   'review.created': 'review:update',
@@ -140,7 +141,7 @@ class SSEEmitter {
     const payload = `data: ${message}\n\n`;
 
     for (const [clientId, client] of this.clients) {
-      if (client.projectId === projectId || client.projectId === '*') {
+      if (client.projectId === projectId) {
         try {
           client.controller.enqueue(new TextEncoder().encode(payload));
         } catch {

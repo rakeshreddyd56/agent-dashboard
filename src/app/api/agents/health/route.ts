@@ -93,7 +93,7 @@ export async function GET(req: NextRequest) {
   let problemCount = 0;
 
   for (const agent of agents) {
-    const sessionName = tmuxSessions.find((s) => s.includes(agent.agent_id)) || null;
+    const sessionName = tmuxSessions.find((s) => s === agent.agent_id || s.endsWith('-' + agent.agent_id)) || null;
     const tmuxAlive = !!sessionName;
     const tmuxCommand = sessionName ? getTmuxPaneCommand(sessionName) : null;
     const lastOutput = sessionName ? getTmuxPaneOutput(sessionName, 5) : null;

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
+import { validateAuth } from '@/lib/auth';
 
 // Only allow alphanumeric, hyphens, underscores, dots in session names
 function sanitizeSessionName(name: string): string | null {
@@ -14,10 +15,15 @@ export async function GET(req: NextRequest) {
   try {
     switch (action) {
       case 'list': {
-        const output = execSync('tmux ls 2>/dev/null || true', {
-          encoding: 'utf-8',
-          timeout: 5000,
-        }).trim();
+        let output = '';
+        try {
+          output = execFileSync('tmux', ['ls'], {
+            encoding: 'utf-8',
+            timeout: 5000,
+          }).trim();
+        } catch {
+          output = '';
+        }
 
         if (!output) {
           return NextResponse.json({ sessions: [] });
@@ -52,10 +58,15 @@ export async function GET(req: NextRequest) {
 
         const lines = Math.min(Number(searchParams.get('lines') || '100'), 500);
 
-        const output = execSync(
-          `tmux capture-pane -t ${sanitized} -p -S -${lines} 2>/dev/null || echo "[Session not found or not accessible]"`,
-          { encoding: 'utf-8', timeout: 5000 }
-        );
+        let output: string;
+        try {
+          output = execFileSync('tmux', ['capture-pane', '-t', sanitized, '-p', '-S', `-${lines}`], {
+            encoding: 'utf-8',
+            timeout: 5000,
+          });
+        } catch {
+          output = '[Session not found or not accessible]';
+        }
 
         return NextResponse.json({
           session: sanitized,
@@ -65,6 +76,10 @@ export async function GET(req: NextRequest) {
       }
 
       case 'kill': {
+        // Kill is destructive — require auth when secret is configured
+        const authError = validateAuth(req);
+        if (authError) return authError;
+
         const session = searchParams.get('session');
         if (!session) {
           return NextResponse.json({ error: 'session parameter required' }, { status: 400 });
@@ -76,7 +91,7 @@ export async function GET(req: NextRequest) {
         }
 
         try {
-          execSync(`tmux kill-session -t ${sanitized} 2>/dev/null`, {
+          execFileSync('tmux', ['kill-session', '-t', sanitized], {
             encoding: 'utf-8',
             timeout: 5000,
           });
@@ -92,7 +107,7 @@ export async function GET(req: NextRequest) {
   } catch (err) {
     return NextResponse.json({
       error: 'tmux command failed',
-      details: err instanceof Error ? err.message : 'Unknown error',
+      details: 'Command execution failed',
     }, { status: 500 });
   }
 }

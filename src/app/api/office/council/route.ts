@@ -44,7 +44,8 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true, member });
   } catch (err) {
-    return NextResponse.json({ error: String(err) }, { status: 500 });
+    console.error('POST /api/office/council error:', err);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
@@ -66,6 +67,7 @@ export async function DELETE(req: NextRequest) {
 
     return NextResponse.json({ ok: true });
   } catch (err) {
-    return NextResponse.json({ error: String(err) }, { status: 500 });
+    console.error('DELETE /api/office/council error:', err);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

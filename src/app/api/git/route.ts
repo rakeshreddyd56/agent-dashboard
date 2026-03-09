@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db, schema } from '@/lib/db';
 import { eq } from 'drizzle-orm';
 import { execFileSync } from 'child_process';
+import { validateAuth } from '@/lib/auth';
 import fs from 'fs';
 
 export async function GET(req: NextRequest) {
@@ -57,6 +58,10 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  // Auth check — git write operations require auth when secret is configured
+  const authError = validateAuth(req);
+  if (authError) return authError;
+
   try {
     let body: Record<string, unknown>;
     try {

@@ -9,7 +9,7 @@ import {
 } from '@/lib/db/project-queries';
 import { projectTablesExist, createProjectTables } from '@/lib/db/dynamic-tables';
 
-const VALID_STATUSES = new Set(['BACKLOG', 'TODO', 'ASSIGNED', 'IN_PROGRESS', 'REVIEW', 'TESTING', 'FAILED', 'TESTED', 'DONE']);
+const VALID_STATUSES = new Set(['BACKLOG', 'TODO', 'ASSIGNED', 'IN_PROGRESS', 'REVIEW', 'QUALITY_REVIEW', 'TESTING', 'FAILED', 'TESTED', 'DONE']);
 const VALID_PRIORITIES = new Set(['P0', 'P1', 'P2', 'P3']);
 
 export async function GET(req: NextRequest) {

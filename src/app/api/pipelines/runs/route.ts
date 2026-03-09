@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db, schema } from '@/lib/db';
 import { eq, and, desc } from 'drizzle-orm';
 import { eventBus } from '@/lib/events/event-bus';
+import { upsertProjectTask, type TaskRow } from '@/lib/db/project-queries';
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -135,23 +136,22 @@ async function createTaskFromTemplate(templateId: string, projectId: string): Pr
     if (agent) assignedAgent = agent.agentId;
   }
 
-  db.insert(schema.tasks).values({
+  upsertProjectTask(projectId, {
     id: taskId,
-    projectId,
-    externalId: null,
+    external_id: null,
     title: template.taskTitle,
     description: template.taskDescription || null,
     status: assignedAgent ? 'ASSIGNED' : 'TODO',
     priority: template.priority,
-    assignedAgent,
+    assigned_agent: assignedAgent,
     tags: template.tags,
     effort: template.estimatedEffort || null,
     dependencies: '[]',
     source: 'coordination',
-    columnOrder: 0,
-    createdAt: now,
-    updatedAt: now,
-  }).run();
+    column_order: 0,
+    created_at: now,
+    updated_at: now,
+  } as TaskRow);
 
   eventBus.broadcast('task.created', {
     id: taskId, projectId, title: template.taskTitle,

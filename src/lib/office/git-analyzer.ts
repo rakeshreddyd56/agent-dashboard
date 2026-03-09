@@ -2,30 +2,41 @@
  * Git Analyzer — Clones repos and analyzes project structure for research council.
  */
 
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import type { GitProjectAnalysis } from '@/lib/types';
 
 const REPOS_DIR = path.resolve('./data/office/repos');
 
-function safeExec(cmd: string, cwd?: string): string {
+function safeExecFile(cmd: string, args: string[], cwd?: string): string {
   try {
-    return execSync(cmd, { cwd, timeout: 30_000, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
+    return execFileSync(cmd, args, { cwd, timeout: 30_000, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
   } catch {
     return '';
   }
 }
 
+// Validate git URLs to prevent command injection
+function isValidGitUrl(url: string): boolean {
+  return /^(https?:\/\/|git@|ssh:\/\/)[\w.\-\/:@]+\.git$/.test(url) || /^(https?:\/\/|git@)[\w.\-\/:@]+$/.test(url);
+}
+
 export async function cloneAndAnalyze(gitUrl: string, projectId: string): Promise<GitProjectAnalysis> {
-  const repoDir = path.join(REPOS_DIR, projectId);
+  if (!isValidGitUrl(gitUrl)) {
+    throw new Error('Invalid git URL format');
+  }
+
+  // Sanitize projectId for filesystem safety
+  const safeProjectId = projectId.replace(/[^a-zA-Z0-9._-]/g, '');
+  const repoDir = path.join(REPOS_DIR, safeProjectId);
 
   // Clone or pull
   if (!fs.existsSync(repoDir)) {
     fs.mkdirSync(repoDir, { recursive: true });
-    safeExec(`git clone --depth 50 "${gitUrl}" "${repoDir}"`);
+    safeExecFile('git', ['clone', '--depth', '50', gitUrl, repoDir]);
   } else if (fs.existsSync(path.join(repoDir, '.git'))) {
-    safeExec('git pull --ff-only', repoDir);
+    safeExecFile('git', ['pull', '--ff-only'], repoDir);
   }
 
   return analyzeProject(repoDir);
@@ -39,7 +50,7 @@ function analyzeProject(projectPath: string): GitProjectAnalysis {
   const repoName = path.basename(projectPath);
 
   // Recent commits
-  const commitLog = safeExec('git log --oneline -20', projectPath);
+  const commitLog = safeExecFile('git', ['log', '--oneline', '-20'], projectPath);
   const recentCommits = commitLog ? commitLog.split('\n').filter(Boolean) : [];
 
   // Tech stack detection
@@ -96,8 +107,8 @@ function analyzeProject(projectPath: string): GitProjectAnalysis {
   }
 
   // File structure (top 2 levels)
-  const fileStructure = safeExec('find . -maxdepth 2 -type f -not -path "*/node_modules/*" -not -path "*/.git/*" | head -50', projectPath)
-    || safeExec('ls -la', projectPath);
+  const fileStructure = safeExecFile('find', ['.', '-maxdepth', '2', '-type', 'f', '-not', '-path', '*/node_modules/*', '-not', '-path', '*/.git/*'], projectPath).split('\n').slice(0, 50).join('\n')
+    || safeExecFile('ls', ['-la'], projectPath);
 
   return {
     repoName,

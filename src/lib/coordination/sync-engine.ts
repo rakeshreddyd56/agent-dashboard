@@ -37,16 +37,35 @@ export function cleanupProject(projectId: string) {
   eventOffsets.delete(projectId);
   progressSeen.delete(projectId);
   syncLocks.delete(projectId);
+  syncLockTimes.delete(projectId);
+
+  // Clean up relay counters for this project
+  try {
+    import('./relay').then(({ clearRelayCounters }) => {
+      clearRelayCounters(projectId);
+    }).catch(() => {});
+  } catch {}
 }
 
+const SYNC_TIMEOUT_MS = 120_000; // 2 minutes
+const syncLockTimes = new Map<string, number>();
+
 export async function syncProject(project: Project) {
-  // Per-project lock: skip if already syncing this project
-  if (syncLocks.get(project.id)) return;
+  const now = Date.now();
+  // Check for stale lock (timed out)
+  if (syncLocks.get(project.id)) {
+    const lockTime = syncLockTimes.get(project.id) || 0;
+    if (now - lockTime < SYNC_TIMEOUT_MS) return; // Still within timeout
+    // Lock timed out — force release
+    console.warn(`syncProject: force-releasing stale lock for ${project.id}`);
+  }
   syncLocks.set(project.id, true);
+  syncLockTimes.set(project.id, now);
   try {
     await _syncProjectInner(project);
   } finally {
     syncLocks.set(project.id, false);
+    syncLockTimes.delete(project.id);
   }
 }
 
@@ -101,7 +120,6 @@ async function _syncProjectInner(project: Project) {
     }
   }
   // No stale marking here — heartbeat-checker handles it with tmux probing
-  const staleAgentIds: string[] = [];
 
   // Upsert agents into per-project table
   const agentRows: AgentRow[] = agents.map((a) => ({
@@ -125,32 +143,7 @@ async function _syncProjectInner(project: Project) {
   }));
 
   bulkUpsertProjectAgents(projectId, agentRows);
-  eventBus.broadcast('agent.synced', { agents, staleAgentIds }, projectId);
-
-  // Emit warning events for stale agents
-  for (const agentId of staleAgentIds) {
-    const staleEvent: EventRow = {
-      id: `${projectId}-evt-stale-${agentId}-${Date.now()}`,
-      timestamp: new Date().toISOString(),
-      level: 'warning',
-      agent_id: agentId,
-      agent_role: null,
-      message: `Agent ${agentId} may have crashed (no heartbeat for >5 minutes)`,
-      details: null,
-    };
-    insertProjectEvent(projectId, staleEvent);
-
-    eventBus.broadcast('agent.heartbeat_lost', {
-      events: [{
-        id: staleEvent.id,
-        projectId,
-        timestamp: staleEvent.timestamp,
-        level: staleEvent.level,
-        agentId,
-        message: staleEvent.message,
-      }],
-    }, projectId);
-  }
+  eventBus.broadcast('agent.synced', { agents }, projectId);
 
   // 2. Sync file locks into per-project table
   const locks = parseLocks(coordinationPath, projectId);
@@ -224,7 +217,7 @@ async function _syncProjectInner(project: Project) {
   // unless the file-parsed status is also advanced (e.g., file says DONE).
   const STATUS_RANK: Record<string, number> = {
     'BACKLOG': 0, 'TODO': 1, 'ASSIGNED': 2, 'IN_PROGRESS': 3,
-    'REVIEW': 4, 'TESTING': 5, 'TESTED': 6, 'DONE': 7, 'FAILED': 2,
+    'REVIEW': 4, 'QUALITY_REVIEW': 5, 'TESTING': 6, 'FAILED': 2, 'TESTED': 7, 'DONE': 8,
   };
   const existingTasks = getProjectTasks(projectId);
   const existingStatusByExtId = new Map<string, string>();

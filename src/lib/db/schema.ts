@@ -59,7 +59,7 @@ export const events = sqliteTable('events', {
 
 export const taskComments = sqliteTable('task_comments', {
   id: text('id').primaryKey(),
-  taskId: text('task_id').notNull().references(() => tasks.id),
+  taskId: text('task_id').notNull(), // No FK — tasks live in per-project tables
   projectId: text('project_id').notNull().references(() => projects.id),
   agentId: text('agent_id').notNull(),
   content: text('content').notNull(),
@@ -129,7 +129,7 @@ export const notifications = sqliteTable('notifications', {
 export const qualityReviews = sqliteTable('quality_reviews', {
   id: text('id').primaryKey(),
   projectId: text('project_id').notNull().references(() => projects.id),
-  taskId: text('task_id').notNull().references(() => tasks.id),
+  taskId: text('task_id').notNull(), // No FK — tasks live in per-project tables
   reviewer: text('reviewer').notNull(),
   status: text('status').notNull(), // pending, approved, rejected, needs_changes
   notes: text('notes'),

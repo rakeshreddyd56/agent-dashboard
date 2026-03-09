@@ -196,7 +196,7 @@ function createDb() {
     CREATE TABLE IF NOT EXISTS quality_reviews (
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL REFERENCES projects(id),
-      task_id TEXT NOT NULL REFERENCES tasks(id),
+      task_id TEXT NOT NULL,
       reviewer TEXT NOT NULL,
       status TEXT NOT NULL,
       notes TEXT,
@@ -404,6 +404,36 @@ function createDb() {
       }
     }
   } catch { /* non-fatal — tables will be migrated on next createProjectTables call */ }
+
+  // Migration: Remove FK constraint on quality_reviews.task_id (tasks moved to per-project tables)
+  try {
+    const qrCols = sqlite.pragma('table_info(quality_reviews)') as { name: string }[];
+    if (qrCols.length > 0) {
+      // Check if FK still references tasks table
+      const fks = sqlite.pragma('foreign_key_list(quality_reviews)') as { table: string; from: string }[];
+      const hasTaskFk = fks.some(fk => fk.table === 'tasks' && fk.from === 'task_id');
+      if (hasTaskFk) {
+        sqlite.pragma('foreign_keys = OFF');
+        sqlite.exec(`
+          CREATE TABLE quality_reviews_new (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL REFERENCES projects(id),
+            task_id TEXT NOT NULL,
+            reviewer TEXT NOT NULL,
+            status TEXT NOT NULL,
+            notes TEXT,
+            created_at TEXT NOT NULL
+          );
+          INSERT INTO quality_reviews_new SELECT * FROM quality_reviews;
+          DROP TABLE quality_reviews;
+          ALTER TABLE quality_reviews_new RENAME TO quality_reviews;
+          CREATE INDEX IF NOT EXISTS idx_reviews_task ON quality_reviews(task_id);
+          CREATE INDEX IF NOT EXISTS idx_reviews_project ON quality_reviews(project_id);
+        `);
+        sqlite.pragma('foreign_keys = ON');
+      }
+    }
+  } catch { /* non-fatal */ }
 
   const drizzleDb = drizzle(sqlite, { schema });
 

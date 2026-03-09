@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSchedulerStatus, triggerTask } from '@/lib/scheduler';
+import { validateAuth } from '@/lib/auth';
 
 export async function GET() {
   return NextResponse.json({ tasks: getSchedulerStatus() });
 }
 
 export async function POST(req: NextRequest) {
+  const authError = validateAuth(req);
+  if (authError) return authError;
+
   const body = await req.json();
   const { task } = body;
 
