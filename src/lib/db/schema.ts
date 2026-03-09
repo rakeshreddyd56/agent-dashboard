@@ -260,6 +260,83 @@ export const floorCommunications = sqliteTable('floor_communications', {
   createdAt: text('created_at').notNull(),
 });
 
+// Phase 7: Agent Constitution, Budget, Runs, Approvals
+export const agentConstitutions = sqliteTable('agent_constitutions', {
+  id: text('id').primaryKey(),
+  projectId: text('project_id').notNull().references(() => projects.id),
+  agentRole: text('agent_role').notNull(),
+  title: text('title').notNull(),
+  capabilities: text('capabilities').notNull().default('[]'),
+  permissions: text('permissions').notNull().default('{}'),
+  reportsTo: text('reports_to'),
+  responsibilityScope: text('responsibility_scope').notNull().default('[]'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
+export const costEvents = sqliteTable('cost_events', {
+  id: text('id').primaryKey(),
+  projectId: text('project_id').notNull().references(() => projects.id),
+  agentId: text('agent_id').notNull(),
+  agentRole: text('agent_role').notNull(),
+  provider: text('provider').notNull(),
+  model: text('model').notNull(),
+  inputTokens: integer('input_tokens').notNull().default(0),
+  outputTokens: integer('output_tokens').notNull().default(0),
+  costCents: real('cost_cents').notNull().default(0),
+  runId: text('run_id'),
+  occurredAt: text('occurred_at').notNull(),
+  createdAt: text('created_at').notNull(),
+});
+
+export const agentBudgets = sqliteTable('agent_budgets', {
+  id: text('id').primaryKey(),
+  projectId: text('project_id').notNull().references(() => projects.id),
+  agentRole: text('agent_role').notNull(),
+  budgetMonthlyCents: integer('budget_monthly_cents').notNull().default(500),
+  spentMonthlyCents: real('spent_monthly_cents').notNull().default(0),
+  currentMonth: text('current_month').notNull(),
+  softAlertSent: integer('soft_alert_sent', { mode: 'boolean' }).notNull().default(false),
+  hardStopActive: integer('hard_stop_active', { mode: 'boolean' }).notNull().default(false),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
+export const agentRuns = sqliteTable('agent_runs', {
+  id: text('id').primaryKey(),
+  projectId: text('project_id').notNull().references(() => projects.id),
+  agentId: text('agent_id').notNull(),
+  agentRole: text('agent_role').notNull(),
+  status: text('status').notNull().default('queued'),
+  invocationSource: text('invocation_source').notNull().default('manual'),
+  taskId: text('task_id'),
+  model: text('model'),
+  startedAt: text('started_at'),
+  finishedAt: text('finished_at'),
+  exitCode: integer('exit_code'),
+  inputTokens: integer('input_tokens').notNull().default(0),
+  outputTokens: integer('output_tokens').notNull().default(0),
+  costCents: real('cost_cents').notNull().default(0),
+  toolCalls: integer('tool_calls').notNull().default(0),
+  stdoutExcerpt: text('stdout_excerpt'),
+  createdAt: text('created_at').notNull(),
+});
+
+export const approvals = sqliteTable('approvals', {
+  id: text('id').primaryKey(),
+  projectId: text('project_id').notNull().references(() => projects.id),
+  type: text('type').notNull(),
+  requestedByAgent: text('requested_by_agent').notNull(),
+  requestedByRole: text('requested_by_role').notNull(),
+  status: text('status').notNull().default('pending'),
+  payload: text('payload').notNull().default('{}'),
+  decisionBy: text('decision_by'),
+  decisionNote: text('decision_note'),
+  decidedAt: text('decided_at'),
+  expiresAt: text('expires_at'),
+  createdAt: text('created_at').notNull(),
+});
+
 export const councilMembers = sqliteTable('council_members', {
   id: text('id').primaryKey(),
   projectId: text('project_id').notNull().references(() => projects.id),

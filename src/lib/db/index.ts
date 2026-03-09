@@ -345,6 +345,94 @@ function createDb() {
       created_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_council_project ON council_members(project_id);
+
+    -- Phase 7: Constitution, Budget, Runs, Approvals
+    CREATE TABLE IF NOT EXISTS agent_constitutions (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id),
+      agent_role TEXT NOT NULL,
+      title TEXT NOT NULL,
+      capabilities TEXT NOT NULL DEFAULT '[]',
+      permissions TEXT NOT NULL DEFAULT '{}',
+      reports_to TEXT,
+      responsibility_scope TEXT NOT NULL DEFAULT '[]',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_constitution_project_role ON agent_constitutions(project_id, agent_role);
+    CREATE INDEX IF NOT EXISTS idx_constitution_project ON agent_constitutions(project_id);
+
+    CREATE TABLE IF NOT EXISTS cost_events (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id),
+      agent_id TEXT NOT NULL,
+      agent_role TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      model TEXT NOT NULL,
+      input_tokens INTEGER NOT NULL DEFAULT 0,
+      output_tokens INTEGER NOT NULL DEFAULT 0,
+      cost_cents REAL NOT NULL DEFAULT 0,
+      run_id TEXT,
+      occurred_at TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_cost_events_project_agent ON cost_events(project_id, agent_id);
+    CREATE INDEX IF NOT EXISTS idx_cost_events_occurred ON cost_events(occurred_at);
+
+    CREATE TABLE IF NOT EXISTS agent_budgets (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id),
+      agent_role TEXT NOT NULL,
+      budget_monthly_cents INTEGER NOT NULL DEFAULT 500,
+      spent_monthly_cents REAL NOT NULL DEFAULT 0,
+      current_month TEXT NOT NULL,
+      soft_alert_sent INTEGER NOT NULL DEFAULT 0,
+      hard_stop_active INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_budget_project_role_month ON agent_budgets(project_id, agent_role, current_month);
+
+    CREATE TABLE IF NOT EXISTS agent_runs (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id),
+      agent_id TEXT NOT NULL,
+      agent_role TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'queued',
+      invocation_source TEXT NOT NULL DEFAULT 'manual',
+      task_id TEXT,
+      model TEXT,
+      started_at TEXT,
+      finished_at TEXT,
+      exit_code INTEGER,
+      input_tokens INTEGER NOT NULL DEFAULT 0,
+      output_tokens INTEGER NOT NULL DEFAULT 0,
+      cost_cents REAL NOT NULL DEFAULT 0,
+      tool_calls INTEGER NOT NULL DEFAULT 0,
+      stdout_excerpt TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_runs_project_agent ON agent_runs(project_id, agent_id);
+    CREATE INDEX IF NOT EXISTS idx_runs_status ON agent_runs(status);
+    CREATE INDEX IF NOT EXISTS idx_runs_started ON agent_runs(started_at);
+
+    CREATE TABLE IF NOT EXISTS approvals (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id),
+      type TEXT NOT NULL,
+      requested_by_agent TEXT NOT NULL,
+      requested_by_role TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      payload TEXT NOT NULL DEFAULT '{}',
+      decision_by TEXT,
+      decision_note TEXT,
+      decided_at TEXT,
+      expires_at TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_approvals_project ON approvals(project_id);
+    CREATE INDEX IF NOT EXISTS idx_approvals_status ON approvals(status);
+    CREATE INDEX IF NOT EXISTS idx_approvals_project_status ON approvals(project_id, status);
   `);
 
   // Purge analytics snapshots older than 30 days

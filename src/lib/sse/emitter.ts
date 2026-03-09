@@ -48,6 +48,17 @@ const EVENT_TYPE_MAP: Record<string, SSEEventType> = {
   'office.memory_updated': 'office:memory',
   // Hooks
   'hook.received': 'agent:update',
+  // Phase 7: Constitution, Budget, Runs, Approvals
+  'constitution.updated': 'constitution:update',
+  'budget.updated': 'budget:update',
+  'budget.soft_alert': 'budget:alert',
+  'budget.hard_stop': 'budget:alert',
+  'cost.recorded': 'cost:new',
+  'run.created': 'run:update',
+  'run.updated': 'run:update',
+  'run.completed': 'run:update',
+  'approval.created': 'approval:update',
+  'approval.decided': 'approval:update',
 };
 
 class SSEEmitter {

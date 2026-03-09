@@ -55,8 +55,19 @@ export type EventType =
   | 'office.research_complete'
   | 'office.communication'
   | 'office.memory_updated'
-  // Hooks (Phase 7)
-  | 'hook.received';
+  // Hooks
+  | 'hook.received'
+  // Phase 7: Constitution, Budget, Runs, Approvals
+  | 'constitution.updated'
+  | 'budget.updated'
+  | 'budget.soft_alert'
+  | 'budget.hard_stop'
+  | 'cost.recorded'
+  | 'run.created'
+  | 'run.updated'
+  | 'run.completed'
+  | 'approval.created'
+  | 'approval.decided';
 
 export interface ServerEvent {
   type: EventType;

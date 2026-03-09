@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSchedulerStatus, triggerTask } from '@/lib/scheduler';
+import { getSchedulerStatus, triggerTask, initScheduler } from '@/lib/scheduler';
 import { validateAuth } from '@/lib/auth';
 
 export async function GET() {
+  initScheduler(); // Ensure scheduler is initialized in this module context
   return NextResponse.json({ tasks: getSchedulerStatus() });
 }
 

@@ -24,6 +24,7 @@ interface ScheduledTask {
 const FIVE_MINUTES = 5 * 60 * 1000;
 const TEN_MINUTES = 10 * 60 * 1000;
 const ONE_HOUR = 60 * 60 * 1000;
+const EIGHT_HOURS = 8 * 60 * 60 * 1000;
 const DAILY = 24 * 60 * 60 * 1000;
 const TICK_INTERVAL = 60 * 1000; // Check every 60 seconds
 
@@ -90,6 +91,42 @@ export function initScheduler() {
     enabled: OFFICE_CONFIG.enabled && process.env.OFFICE_ENABLED !== 'false',
   });
 
+  tasks.set('data_pruning', {
+    name: 'Dashboard Data Pruning',
+    intervalMs: EIGHT_HOURS,
+    lastRun: null,
+    nextRun: now + FIVE_MINUTES, // First run 5 min after startup
+    running: false,
+    enabled: true,
+  });
+
+  tasks.set('budget_monthly_reset', {
+    name: 'Monthly Budget Reset',
+    intervalMs: ONE_HOUR, // Check hourly, only acts on month boundary
+    lastRun: null,
+    nextRun: now + ONE_HOUR,
+    running: false,
+    enabled: true,
+  });
+
+  tasks.set('orphaned_runs_cleanup', {
+    name: 'Orphaned Runs Cleanup',
+    intervalMs: TEN_MINUTES,
+    lastRun: null,
+    nextRun: now + TEN_MINUTES,
+    running: false,
+    enabled: true,
+  });
+
+  tasks.set('stale_approvals_cleanup', {
+    name: 'Stale Approvals Expiry',
+    intervalMs: ONE_HOUR,
+    lastRun: null,
+    nextRun: now + ONE_HOUR,
+    running: false,
+    enabled: true,
+  });
+
   tickTimer = setInterval(tick, TICK_INTERVAL);
 }
 
@@ -124,6 +161,18 @@ async function tick() {
           break;
         case 'office_daily_comm':
           result = await runOfficeDailyComm();
+          break;
+        case 'data_pruning':
+          result = runDataPruning();
+          break;
+        case 'budget_monthly_reset':
+          result = runBudgetMonthlyReset();
+          break;
+        case 'orphaned_runs_cleanup':
+          result = await runOrphanedRunsCleanup();
+          break;
+        case 'stale_approvals_cleanup':
+          result = runStaleApprovalsCleanup();
           break;
         default:
           result = { ok: true, message: 'Unknown task' };
@@ -278,6 +327,138 @@ async function runOfficeDailyComm(): Promise<{ ok: boolean; message: string }> {
     return { ok: true, message: `Daily comms sent for ${activeProjects.length} projects` };
   } catch (err) {
     return { ok: false, message: `Daily comm error: ${err instanceof Error ? err.message : 'unknown'}` };
+  }
+}
+
+/**
+ * Prune old operational data from high-volume tables.
+ * Does NOT touch project coordination files.
+ *
+ * Schedule: every 8 hours, first run 5 min after startup.
+ *
+ * Retention:
+ *   3 days — notifications, messages, floor_communications, events
+ *   7 days — audit_log, standup_reports, analytics_snapshots
+ *   1 day  — completed/offline agent_snapshots (keeps latest per agent)
+ *   3 days — per-project _events tables
+ *   7 days — per-project _analytics tables
+ */
+function runDataPruning(): { ok: boolean; message: string } {
+  // Use rawDb lazily to avoid circular import during init
+  const { rawDb: sqlite } = require('@/lib/db');
+  let totalDeleted = 0;
+
+  // Shared tables: [table, column, days]
+  const rules: [string, string, number][] = [
+    ['notifications',        'created_at', 3],
+    ['messages',             'created_at', 3],
+    ['floor_communications', 'created_at', 3],
+    ['events',               'timestamp',  3],
+    ['audit_log',            'created_at', 7],
+    ['standup_reports',      'created_at', 7],
+    ['analytics_snapshots',  'timestamp',  7],
+    ['cost_events',          'occurred_at', 90],
+    ['approvals',            'created_at', 30],
+    ['agent_runs',           'created_at', 30],
+  ];
+
+  for (const [table, col, days] of rules) {
+    try {
+      const cutoff = new Date(Date.now() - days * DAILY).toISOString();
+      const result = sqlite.prepare(
+        `DELETE FROM "${table}" WHERE "${col}" < ?`
+      ).run(cutoff);
+      totalDeleted += result.changes;
+    } catch { /* table may not exist yet */ }
+  }
+
+  // Stale agent snapshots — keep only latest per agent+project
+  try {
+    const result = sqlite.prepare(`
+      DELETE FROM agent_snapshots
+      WHERE status IN ('completed', 'offline', 'crashed')
+      AND created_at < datetime('now', '-1 day')
+      AND id NOT IN (
+        SELECT id FROM (
+          SELECT id, ROW_NUMBER() OVER (
+            PARTITION BY agent_id, project_id ORDER BY created_at DESC
+          ) as rn FROM agent_snapshots
+        ) ranked WHERE rn = 1
+      )
+    `).run();
+    totalDeleted += result.changes;
+  } catch { /* non-fatal */ }
+
+  // Per-project dynamic tables
+  try {
+    const eventTables = sqlite.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%_events'"
+    ).all() as { name: string }[];
+    for (const { name } of eventTables) {
+      try {
+        const r = sqlite.prepare(
+          `DELETE FROM "${name}" WHERE "timestamp" < datetime('now', '-3 days')`
+        ).run();
+        totalDeleted += r.changes;
+      } catch { /* non-fatal */ }
+    }
+
+    const analyticsTables = sqlite.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%_analytics'"
+    ).all() as { name: string }[];
+    for (const { name } of analyticsTables) {
+      try {
+        const r = sqlite.prepare(
+          `DELETE FROM "${name}" WHERE "timestamp" < datetime('now', '-7 days')`
+        ).run();
+        totalDeleted += r.changes;
+      } catch { /* non-fatal */ }
+    }
+  } catch { /* non-fatal */ }
+
+  return { ok: true, message: `Pruned ${totalDeleted} rows` };
+}
+
+/** Reset monthly budgets when the month changes */
+function runBudgetMonthlyReset(): { ok: boolean; message: string } {
+  try {
+    const { resetMonthlyBudgets } = require('@/lib/db/budget-queries');
+    const created = resetMonthlyBudgets();
+    return { ok: true, message: created > 0 ? `Reset ${created} budgets for new month` : 'No budget resets needed' };
+  } catch (err) {
+    return { ok: false, message: `Budget reset error: ${err instanceof Error ? err.message : 'unknown'}` };
+  }
+}
+
+/** Finalize orphaned runs (running but agent is offline) */
+async function runOrphanedRunsCleanup(): Promise<{ ok: boolean; message: string }> {
+  const activeProjects = db.select().from(schema.projects)
+    .where(eq(schema.projects.isActive, true)).all();
+
+  let totalFinalized = 0;
+  for (const project of activeProjects) {
+    try {
+      const { getProjectAgents } = await import('@/lib/db/project-queries');
+      const { finalizeOrphanedRuns } = await import('@/lib/db/run-queries');
+      const agents = getProjectAgents(project.id);
+      const activeIds = agents
+        .filter(a => ['working', 'initializing', 'idle'].includes(a.status))
+        .map(a => a.agent_id);
+      totalFinalized += finalizeOrphanedRuns(project.id, activeIds);
+    } catch { /* non-fatal */ }
+  }
+
+  return { ok: true, message: totalFinalized > 0 ? `Finalized ${totalFinalized} orphaned runs` : 'No orphaned runs' };
+}
+
+/** Expire stale pending approvals (older than 24h) */
+function runStaleApprovalsCleanup(): { ok: boolean; message: string } {
+  try {
+    const { expireStaleApprovals } = require('@/lib/db/approval-queries');
+    const expired = expireStaleApprovals();
+    return { ok: true, message: expired > 0 ? `Expired ${expired} stale approvals` : 'No stale approvals' };
+  } catch (err) {
+    return { ok: false, message: `Approval cleanup error: ${err instanceof Error ? err.message : 'unknown'}` };
   }
 }
 

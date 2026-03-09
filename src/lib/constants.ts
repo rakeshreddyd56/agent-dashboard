@@ -102,6 +102,7 @@ export const NAV_ITEMS = [
   { href: '/analytics', label: 'Analytics', icon: 'BarChart3' },
   { href: '/office', label: 'Office', icon: 'Building2' },
   { href: '/standup', label: 'Standup', icon: 'FileText' },
+  { href: '/approvals', label: 'Approvals', icon: 'ShieldCheck' },
   { href: '/settings', label: 'Settings', icon: 'Settings' },
 ] as const;
 
@@ -119,6 +120,10 @@ export const HOOK_EVENT_TYPES = [
   'SubagentStop',
   'TaskCompleted',
   'Notification',
+  'TeammateIdle',
+  'SubagentStart',
+  'SubagentStop',
+  'ApprovalRequest',
 ] as const;
 
 export type HookEventType = (typeof HOOK_EVENT_TYPES)[number];

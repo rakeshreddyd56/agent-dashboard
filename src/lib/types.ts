@@ -137,7 +137,14 @@ export type SSEEventType =
   | 'office:update'
   | 'office:communication'
   | 'office:memory'
-  | 'office:research';
+  | 'office:research'
+  // Phase 7: Constitution, Budget, Runs, Approvals
+  | 'constitution:update'
+  | 'budget:update'
+  | 'budget:alert'
+  | 'cost:new'
+  | 'run:update'
+  | 'approval:update';
 
 export interface SSEMessage {
   type: SSEEventType;
@@ -265,6 +272,98 @@ export interface CouncilVote {
   ideaIndex: number;
   score: number;
   reasoning: string;
+}
+
+// Phase 7: Constitution, Budget, Runs, Approvals
+export interface AgentPermissions {
+  can_deploy: boolean;
+  can_merge: boolean;
+  can_launch_subagents: boolean;
+  can_approve: boolean;
+  can_override_budget: boolean;
+  max_concurrent_tasks?: number;
+}
+
+export interface AgentConstitution {
+  id: string;
+  projectId: string;
+  agentRole: string;
+  title: string;
+  capabilities: string[];
+  permissions: AgentPermissions;
+  reportsTo?: string;
+  responsibilityScope: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CostEvent {
+  id: string;
+  projectId: string;
+  agentId: string;
+  agentRole: string;
+  provider: string;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  costCents: number;
+  runId?: string;
+  occurredAt: string;
+  createdAt: string;
+}
+
+export interface AgentBudget {
+  id: string;
+  projectId: string;
+  agentRole: string;
+  budgetMonthlyCents: number;
+  spentMonthlyCents: number;
+  currentMonth: string;
+  softAlertSent: boolean;
+  hardStopActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type RunStatus = 'queued' | 'running' | 'completed' | 'failed';
+export type InvocationSource = 'manual' | 'relay' | 'pipeline' | 'subagent';
+
+export interface AgentRun {
+  id: string;
+  projectId: string;
+  agentId: string;
+  agentRole: string;
+  status: RunStatus;
+  invocationSource: InvocationSource;
+  taskId?: string;
+  model?: string;
+  startedAt?: string;
+  finishedAt?: string;
+  exitCode?: number;
+  inputTokens: number;
+  outputTokens: number;
+  costCents: number;
+  toolCalls: number;
+  stdoutExcerpt?: string;
+  createdAt: string;
+}
+
+export type ApprovalType = 'deploy' | 'launch_agent' | 'budget_override' | 'strategy_change' | 'merge';
+export type ApprovalStatus = 'pending' | 'approved' | 'rejected' | 'revision_requested';
+
+export interface Approval {
+  id: string;
+  projectId: string;
+  type: ApprovalType;
+  requestedByAgent: string;
+  requestedByRole: string;
+  status: ApprovalStatus;
+  payload: Record<string, unknown>;
+  decisionBy?: string;
+  decisionNote?: string;
+  decidedAt?: string;
+  expiresAt?: string;
+  createdAt: string;
 }
 
 export interface GitProjectAnalysis {

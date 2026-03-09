@@ -5,6 +5,23 @@ import { eventBus } from '@/lib/events/event-bus';
 import { validateAuth } from '@/lib/auth';
 import type { AgentRow, EventRow } from '@/lib/db/project-queries';
 
+// Model cost rates (per million tokens, in cents)
+const MODEL_COSTS: Record<string, { input: number; output: number }> = {
+  'claude-opus-4-6': { input: 1500, output: 7500 },
+  'claude-sonnet-4-6': { input: 300, output: 1500 },
+  'claude-haiku-4-5-20251001': { input: 80, output: 400 },
+  'claude-sonnet-4-5-20250514': { input: 300, output: 1500 },
+  'claude-3-5-sonnet-20241022': { input: 300, output: 1500 },
+  'claude-3-5-haiku-20241022': { input: 80, output: 400 },
+};
+
+function calculateCost(model: string, inputTokens: number, outputTokens: number): number {
+  // Find matching model (prefix match for flexibility)
+  const key = Object.keys(MODEL_COSTS).find(k => model.startsWith(k) || model.includes(k));
+  const rates = key ? MODEL_COSTS[key] : { input: 300, output: 1500 }; // default to sonnet rates
+  return (inputTokens * rates.input + outputTokens * rates.output) / 1_000_000;
+}
+
 // Debounce: skip PostToolUse heartbeat refresh if last one was <5s ago
 const lastHeartbeatRefresh = new Map<string, number>();
 const HEARTBEAT_DEBOUNCE_MS = 5000;
@@ -99,6 +116,33 @@ export async function POST(req: NextRequest) {
           };
           if (sessionId) updated.sdk_session_id = sessionId;
           upsertProjectAgent(projectId, updated);
+
+          // Create run record
+          try {
+            const { createRun } = await import('@/lib/db/run-queries');
+            const { secureId } = await import('@/lib/auth');
+            const runId = secureId('run');
+            createRun({
+              id: runId,
+              project_id: projectId,
+              agent_id: agent.agent_id,
+              agent_role: agent.role,
+              status: 'running',
+              invocation_source: body.invocation_source || 'manual',
+              task_id: agent.current_task || null,
+              model: agent.model || null,
+              started_at: now,
+              finished_at: null,
+              exit_code: null,
+              input_tokens: 0,
+              output_tokens: 0,
+              cost_cents: 0,
+              tool_calls: 0,
+              stdout_excerpt: null,
+              created_at: now,
+            });
+            eventBus.broadcast('run.created', { runId, agentId: agent.agent_id, agentRole: agent.role }, projectId);
+          } catch { /* non-fatal */ }
         }
         break;
       }
@@ -122,6 +166,60 @@ export async function POST(req: NextRequest) {
             status: agent.status === 'initializing' ? 'working' : agent.status,
           };
           upsertProjectAgent(projectId, updated);
+
+          // Cost tracking + budget enforcement
+          const inputTokens = parseInt(body.input_tokens as string) || 0;
+          const outputTokens = parseInt(body.output_tokens as string) || 0;
+          const model = (body.model as string) || agent.model || 'unknown';
+
+          if (inputTokens > 0 || outputTokens > 0) {
+            try {
+              const costCents = calculateCost(model, inputTokens, outputTokens);
+              const { insertCostEvent, incrementSpent } = await import('@/lib/db/budget-queries');
+              const { secureId } = await import('@/lib/auth');
+              const { getActiveRunForAgent, incrementRunCounters } = await import('@/lib/db/run-queries');
+
+              // Record cost event
+              insertCostEvent({
+                id: secureId('cost'),
+                project_id: projectId,
+                agent_id: agent.agent_id,
+                agent_role: agent.role,
+                provider: model.startsWith('claude') ? 'anthropic' : 'unknown',
+                model,
+                input_tokens: inputTokens,
+                output_tokens: outputTokens,
+                cost_cents: costCents,
+                run_id: null,
+                occurred_at: now,
+                created_at: now,
+              });
+
+              eventBus.broadcast('cost.recorded', {
+                agentId: agent.agent_id, agentRole: agent.role, costCents, model,
+              }, projectId);
+
+              // Increment budget spent + check thresholds
+              const budgetStatus = incrementSpent(projectId, agent.role, costCents);
+
+              if (budgetStatus.softAlert) {
+                eventBus.broadcast('budget.soft_alert', {
+                  agentRole: agent.role, percentUsed: budgetStatus.percentUsed,
+                }, projectId);
+              }
+              if (budgetStatus.hardStop) {
+                eventBus.broadcast('budget.hard_stop', {
+                  agentRole: agent.role, percentUsed: budgetStatus.percentUsed,
+                }, projectId);
+              }
+
+              // Increment run counters if there's an active run
+              const activeRun = getActiveRunForAgent(projectId, agent.agent_id);
+              if (activeRun) {
+                incrementRunCounters(activeRun.id, inputTokens, outputTokens, costCents);
+              }
+            } catch { /* non-fatal — cost tracking should never break hooks */ }
+          }
         }
         break;
       }
@@ -134,6 +232,19 @@ export async function POST(req: NextRequest) {
             last_heartbeat: now,
           };
           upsertProjectAgent(projectId, updated);
+
+          // Finalize active run
+          try {
+            const { getActiveRunForAgent, finalizeRun } = await import('@/lib/db/run-queries');
+            const activeRun = getActiveRunForAgent(projectId, agent.agent_id);
+            if (activeRun) {
+              const exitCode = parseInt(body.exit_code as string) || 0;
+              finalizeRun(activeRun.id, exitCode, (body.stdout_excerpt as string) || undefined);
+              eventBus.broadcast('run.completed', {
+                runId: activeRun.id, agentId: agent.agent_id, agentRole: agent.role, exitCode,
+              }, projectId);
+            }
+          } catch { /* non-fatal */ }
 
           // Kill tmux session immediately on completion
           try {
@@ -214,6 +325,18 @@ export async function POST(req: NextRequest) {
           };
           upsertProjectAgent(projectId, updated);
 
+          // Finalize active run
+          try {
+            const { getActiveRunForAgent, finalizeRun } = await import('@/lib/db/run-queries');
+            const activeRun = getActiveRunForAgent(projectId, agent.agent_id);
+            if (activeRun) {
+              finalizeRun(activeRun.id, 0); // Task completed = success
+              eventBus.broadcast('run.completed', {
+                runId: activeRun.id, agentId: agent.agent_id, agentRole: agent.role, exitCode: 0,
+              }, projectId);
+            }
+          } catch { /* non-fatal */ }
+
           // Kill tmux session immediately on completion
           try {
             const { execFileSync } = await import('child_process');
@@ -284,6 +407,57 @@ export async function POST(req: NextRequest) {
             details: JSON.stringify({ agentType: body.agent_type }),
           };
           insertProjectEvent(projectId, evt);
+        }
+        break;
+      }
+
+      case 'ApprovalRequest': {
+        // Agent requests approval via hook
+        if (agent) {
+          try {
+            const { createApproval } = await import('@/lib/db/approval-queries');
+            const { secureId } = await import('@/lib/auth');
+            const approvalType = (body.approval_type as string) || 'strategy_change';
+            const validTypes = ['deploy', 'launch_agent', 'budget_override', 'strategy_change', 'merge'];
+            if (validTypes.includes(approvalType)) {
+              const approvalId = secureId('appr');
+              createApproval({
+                id: approvalId,
+                project_id: projectId,
+                type: approvalType,
+                requested_by_agent: agent.agent_id,
+                requested_by_role: agent.role,
+                status: 'pending',
+                payload: JSON.stringify({
+                  description: body.description || '',
+                  context: body.context || '',
+                }),
+                decision_by: null,
+                decision_note: null,
+                decided_at: null,
+                expires_at: null,
+                created_at: now,
+              });
+              eventBus.broadcast('approval.created', {
+                id: approvalId, type: approvalType,
+                requestedByAgent: agent.agent_id, requestedByRole: agent.role,
+              }, projectId);
+
+              // Create notification for user
+              try {
+                const { rawDb } = await import('@/lib/db');
+                rawDb.prepare(`
+                  INSERT INTO notifications (id, project_id, recipient, type, title, message, source_type, source_id, created_at)
+                  VALUES (?, ?, 'user', 'approval', ?, ?, 'approval', ?, ?)
+                `).run(
+                  `notif-appr-${Date.now()}`, projectId,
+                  `Approval needed: ${approvalType}`,
+                  `${agent.role} (${agent.agent_id}) requests approval: ${body.description || approvalType}`,
+                  approvalId, now,
+                );
+              } catch { /* non-fatal */ }
+            }
+          } catch { /* non-fatal */ }
         }
         break;
       }

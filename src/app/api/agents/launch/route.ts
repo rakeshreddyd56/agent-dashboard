@@ -859,6 +859,20 @@ export async function POST(req: NextRequest) {
         }
       }
 
+      // Budget gate — reject if agent's role has hit hard stop
+      try {
+        const { getAgentBudget } = await import('@/lib/db/budget-queries');
+        const budget = getAgentBudget(projectId as string, sanitizedRole);
+        if (budget && budget.hard_stop_active) {
+          launchingLock.delete(sessionName);
+          results.push({
+            role: sanitizedRole, status: 'budget_blocked',
+            error: `Budget exceeded (${Math.round((budget.spent_monthly_cents / budget.budget_monthly_cents) * 100)}% used). Increase budget or wait for monthly reset.`,
+          });
+          continue;
+        }
+      } catch { /* non-fatal — don't block launch if budget check fails */ }
+
       // SDK launch mode — use programmatic spawning instead of tmux
       if (launchModeParam === 'sdk') {
         try {
